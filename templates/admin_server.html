@@ -8,14 +8,14 @@
     Real generation uses the <strong>official WanGP Python API</strong>
     (<code class="text-xs">session.submit_task</code> from
     <a class="text-brand underline" href="https://github.com/deepbeepmeep/Wan2GP/blob/main/docs/API.md" target="_blank" rel="noopener">API.md</a>).
-    Point <strong>WanGP install path</strong> at your clone folder (must contain <code class="text-xs">shared/api.py</code>).
+    For a <strong>remote</strong> WanGP MCP server, set the MCP URL only (e.g. <code class="text-xs">http://YOUR_SERVER:8080/mcp</code>). Media is uploaded via Gallery transfer; local install path is optional fallback on the same machine.
   </p>
 
   <form id="server-form" class="space-y-5 p-6 sm:p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
     
     <div>
       <label class="block text-sm font-medium mb-1.5">MCP base URL (recommended)</label>
-      <input id="wan2gp_mcp_url" value="{{ settings.wan2gp_mcp_url or 'http://127.0.0.1:8080/mcp' }}" placeholder="http://127.0.0.1:8080/mcp"
+      <input id="wan2gp_mcp_url" value="{{ settings.wan2gp_mcp_url or '' }}" placeholder="http://YOUR_REMOTE_HOST:8080/mcp" placeholder="http://YOUR_REMOTE_HOST:8080/mcp"
         class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
       <p class="text-xs text-slate-400 mt-1">WanGP Streamable HTTP MCP endpoint. Tools: <code>wangp_generate</code>, <code>wangp_get_job</code>, <code>wangp_list_models</code>, … Launch with <code>python wgp.py --mcp --mcp-transport streamable-http --mcp-host 0.0.0.0 --mcp-port 8080</code></p>
     </div>

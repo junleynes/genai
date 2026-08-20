@@ -46,6 +46,7 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
 
     model_type = (
         params.get("model_type")
+        or (params.get("model") if params.get("model") not in (None, "", "auto") else None)
         or defaults.get("model_type")
         or "ltx2_22B_distilled"
     )
@@ -73,10 +74,22 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
         "_api": {"return_media": True},
     }
 
-    image_path = job.get("image_path") or params.get("image_path")
-    image_end = job.get("image_end_path") or params.get("image_end_path")
-    video_path = job.get("video_path") or params.get("video_path")
-    audio_path = job.get("audio_path") or params.get("audio_path")
+    image_path = (
+        job.get("image_path") or params.get("image_path")
+        or params.get("image_url") or job.get("image_url")
+    )
+    image_end = (
+        job.get("image_end_path") or params.get("image_end_path")
+        or params.get("end_image_url") or job.get("end_image_url")
+    )
+    video_path = (
+        job.get("video_path") or params.get("video_path")
+        or params.get("video_url") or job.get("video_url")
+    )
+    audio_path = (
+        job.get("audio_path") or params.get("audio_path")
+        or params.get("audio_url") or job.get("audio_url")
+    )
 
     if jtype in ("i2v", "ia2v") and image_path:
         settings["image_start"] = str(image_path)
@@ -252,6 +265,140 @@ def mcp_call_tool(mcp_url: str, name: str, arguments: dict, timeout: float = 120
         return _parse_mcp_tool_result(data)
 
 
+
+
+def mcp_upload_media(mcp_url: str, local_path: str) -> str:
+    """
+    Remote-safe media transfer (API.md):
+      1) wangp_create_gallery_upload(filename) → short-lived PUT URL + gallery prep
+      2) PUT raw bytes to returned URL
+    Returns gallery id (or path string usable as settings media field).
+    """
+    import httpx
+    from pathlib import Path as P
+    path = P(local_path)
+    if not path.is_file():
+        # Already a gallery id or remote ref
+        return str(local_path)
+
+    create = mcp_call_tool(
+        mcp_url,
+        "wangp_create_gallery_upload",
+        {"filename": path.name},
+        timeout=60.0,
+    )
+    if not isinstance(create, dict):
+        raise RuntimeError(f"gallery upload create failed: {create}")
+
+    upload_url = (
+        create.get("url")
+        or create.get("upload_url")
+        or create.get("put_url")
+        or create.get("href")
+    )
+    gallery_id = (
+        create.get("gallery_id")
+        or create.get("id")
+        or create.get("item_id")
+    )
+
+    # Resolve relative URL against MCP origin
+    if upload_url and upload_url.startswith("/"):
+        base = mcp_url.rstrip("/")
+        if base.endswith("/mcp"):
+            base = base[:-4]
+        upload_url = base.rstrip("/") + upload_url
+
+    if not upload_url:
+        raise RuntimeError(f"No upload URL from wangp_create_gallery_upload: {create}")
+
+    data = path.read_bytes()
+    headers = {"Content-Type": "application/octet-stream"}
+    # Some servers return content_type
+    ct = create.get("content_type") or create.get("mime")
+    if ct:
+        headers["Content-Type"] = ct
+
+    with httpx.Client(timeout=600.0) as client:
+        put = client.put(upload_url, content=data, headers=headers)
+        if put.status_code >= 400:
+            # try POST fallback
+            put = client.post(upload_url, content=data, headers=headers)
+        if put.status_code >= 400:
+            raise RuntimeError(f"Gallery PUT failed HTTP {put.status_code}: {put.text[:300]}")
+
+        # Response may include gallery id
+        try:
+            body = put.json()
+            if isinstance(body, dict):
+                gallery_id = (
+                    body.get("gallery_id")
+                    or body.get("id")
+                    or body.get("item_id")
+                    or gallery_id
+                )
+        except Exception:
+            pass
+
+    if not gallery_id:
+        # Some implementations return id only in create response as "gallery_id" after PUT selects item
+        gallery_id = create.get("gallery_id") or create.get("suggested_id")
+    if not gallery_id:
+        raise RuntimeError(f"Upload OK but no gallery_id. create={create} put={put.status_code}")
+
+    return str(gallery_id)
+
+
+def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
+    """Map job → settings and replace local file paths with Gallery ids for remote MCP."""
+    defaults = {
+        "model_type": settings_cfg.get("default_model_type") or "ltx2_22B_distilled",
+        "resolution": settings_cfg.get("default_resolution") or "1280x704",
+        "num_inference_steps": settings_cfg.get("default_steps") or 8,
+        "force_fps": settings_cfg.get("default_fps") or "24",
+    }
+    source = _map_job_to_settings(job, defaults)
+
+    # Job may store web-relative paths under static/uploads
+    def resolve_local(p: str | None) -> str | None:
+        if not p:
+            return None
+        path = Path(p)
+        if path.is_file():
+            return str(path)
+        # /static/uploads/xxx → local file
+        rel = str(p).lstrip("/")
+        candidate = Path(__file__).parent.parent / rel
+        if candidate.is_file():
+            return str(candidate)
+        # bare filename in uploads
+        candidate = UPLOAD_DIR / Path(p).name
+        if candidate.is_file():
+            return str(candidate)
+        return str(p)
+
+    media_keys = ("image_start", "image_end", "image_refs", "video_source", "video_guide", "audio_guide", "audio_guide2")
+    for key in media_keys:
+        val = source.get(key)
+        if not val:
+            continue
+        if isinstance(val, list):
+            new_list = []
+            for item in val:
+                local = resolve_local(str(item))
+                if local and Path(local).is_file():
+                    new_list.append(mcp_upload_media(mcp_url, local))
+                else:
+                    new_list.append(item)
+            source[key] = new_list
+        else:
+            local = resolve_local(str(val))
+            if local and Path(local).is_file():
+                source[key] = mcp_upload_media(mcp_url, local)
+
+    return source
+
+
 def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
     """
     wangp_generate(source=settings, wait=False) then poll wangp_get_job.
@@ -260,13 +407,12 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
     if not mcp_url:
         return False
 
-    defaults = {
-        "model_type": settings_cfg.get("default_model_type") or "ltx2_22B_distilled",
-        "resolution": settings_cfg.get("default_resolution") or "1280x704",
-        "num_inference_steps": settings_cfg.get("default_steps") or 8,
-        "force_fps": settings_cfg.get("default_fps") or "24",
-    }
-    source = _map_job_to_settings(job, defaults)
+    try:
+        source = _prepare_mcp_source(mcp_url, job, settings_cfg)
+    except Exception as e:
+        logger.exception("MCP media upload failed")
+        db.update_job(job_id, {"error": f"MCP media upload: {e}"[:800]})
+        return False
     logger.info("MCP wangp_generate source keys=%s", list(source.keys()))
 
     try:
