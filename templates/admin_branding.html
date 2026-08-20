@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Branding – {{ settings.app_name }}{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-10">
+  <a href="/admin" class="text-sm text-slate-500 hover:text-brand mb-4 inline-block">← Admin</a>
+  <h1 class="text-3xl font-bold tracking-tight mb-8">Branding</h1>
+
+  <form id="brand-form" class="space-y-5 p-6 sm:p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+    <div>
+      <label class="block text-sm font-medium mb-1.5">App name</label>
+      <input name="app_name" value="{{ settings.app_name }}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1.5">Tagline</label>
+      <input name="tagline" value="{{ settings.tagline }}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1.5">Footer text</label>
+      <input name="footer" value="{{ settings.footer }}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+    </div>
+    <div class="grid sm:grid-cols-3 gap-4">
+      <div>
+        <label class="block text-sm font-medium mb-1.5">Primary</label>
+        <input type="color" name="primary_color" value="{{ settings.primary_color }}" class="w-full h-10 rounded-lg cursor-pointer" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1.5">Secondary</label>
+        <input type="color" name="secondary_color" value="{{ settings.secondary_color }}" class="w-full h-10 rounded-lg cursor-pointer" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1.5">Accent</label>
+        <input type="color" name="accent_color" value="{{ settings.accent_color }}" class="w-full h-10 rounded-lg cursor-pointer" />
+      </div>
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1.5">Default theme</label>
+      <select name="default_theme" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
+        <option value="system" {% if settings.default_theme == 'system' %}selected{% endif %}>System</option>
+        <option value="light" {% if settings.default_theme == 'light' %}selected{% endif %}>Light</option>
+        <option value="dark" {% if settings.default_theme == 'dark' %}selected{% endif %}>Dark</option>
+      </select>
+    </div>
+    <button type="submit" class="btn-brand px-5 py-2.5 rounded-xl font-semibold">Save branding</button>
+  </form>
+
+  <div class="mt-10 grid sm:grid-cols-2 gap-6">
+    <div class="p-6 rounded-2xl border border-slate-200 dark:border-slate-800">
+      <h3 class="font-semibold mb-3">Logo</h3>
+      {% if settings.logo_url %}<img src="{{ settings.logo_url }}" class="h-12 mb-3 object-contain" />{% endif %}
+      <input type="file" id="logo-file" accept="image/*" class="text-sm" />
+      <button type="button" onclick="upload('logo')" class="mt-2 text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">Upload logo</button>
+    </div>
+    <div class="p-6 rounded-2xl border border-slate-200 dark:border-slate-800">
+      <h3 class="font-semibold mb-3">Favicon</h3>
+      {% if settings.favicon_url %}<img src="{{ settings.favicon_url }}" class="h-8 mb-3 object-contain" />{% endif %}
+      <input type="file" id="favicon-file" accept="image/*,.ico" class="text-sm" />
+      <button type="button" onclick="upload('favicon')" class="mt-2 text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">Upload favicon</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+if (!requireAdmin()) throw new Error('admin');
+
+document.getElementById('brand-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const body = Object.fromEntries(fd.entries());
+  try {
+    await API.put('/api/admin/branding', body);
+    toast('Branding saved – reload to see colors', 'success');
+    setTimeout(() => location.reload(), 1000);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+});
+
+async function upload(kind) {
+  const input = document.getElementById(kind + '-file');
+  if (!input.files?.[0]) { toast('Choose a file first', 'error'); return; }
+  const fd = new FormData();
+  fd.append('kind', kind);
+  fd.append('file', input.files[0]);
+  const token = localStorage.getItem(TOKEN_KEY);
+  try {
+    const res = await fetch('/api/admin/upload', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token },
+      body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Upload failed');
+    toast(kind + ' uploaded', 'success');
+    setTimeout(() => location.reload(), 800);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+</script>
+{% endblock %}

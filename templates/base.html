@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}{{ settings.app_name }}{% endblock %}</title>
+  {% if settings.favicon_url %}
+  <link rel="icon" href="{{ settings.favicon_url }}" />
+  {% endif %}
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              DEFAULT: '{{ settings.primary_color }}',
+              secondary: '{{ settings.secondary_color }}',
+              accent: '{{ settings.accent_color }}',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --brand: {{ settings.primary_color }};
+      --brand-secondary: {{ settings.secondary_color }};
+      --brand-accent: {{ settings.accent_color }};
+    }
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .bg-brand { background-color: var(--brand); }
+    .text-brand { color: var(--brand); }
+    .border-brand { border-color: var(--brand); }
+    .ring-brand { --tw-ring-color: var(--brand); }
+    .btn-brand {
+      background: linear-gradient(135deg, var(--brand), var(--brand-secondary));
+      color: white;
+    }
+    .btn-brand:hover { filter: brightness(1.08); }
+    .glass {
+      background: rgba(255,255,255,0.7);
+      backdrop-filter: blur(12px);
+    }
+    .dark .glass {
+      background: rgba(15,23,42,0.75);
+    }
+    .progress-bar {
+      transition: width 0.4s ease;
+    }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 transition-colors duration-300">
+  <div id="app" class="min-h-full flex flex-col">
+    <!-- Navbar -->
+    <nav class="sticky top-0 z-50 border-b border-slate-200/80 dark:border-slate-800 glass">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex h-16 items-center justify-between">
+          <div class="flex items-center gap-3">
+            <a href="/" class="flex items-center gap-2.5 group">
+              {% if settings.logo_url %}
+              <img src="{{ settings.logo_url }}" alt="Logo" class="h-8 w-auto rounded" />
+              {% else %}
+              <div class="h-9 w-9 rounded-xl btn-brand flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+              </div>
+              {% endif %}
+              <div>
+                <span class="font-semibold text-lg tracking-tight">{{ settings.app_name }}</span>
+                <p class="text-[11px] text-slate-500 dark:text-slate-400 -mt-0.5 hidden sm:block">{{ settings.tagline }}</p>
+              </div>
+            </a>
+          </div>
+
+          <div class="hidden md:flex items-center gap-1" id="nav-links">
+            <!-- filled by JS -->
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button id="theme-toggle" type="button" class="p-2 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800 transition" title="Toggle theme">
+              <svg id="icon-sun" class="w-5 h-5 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+              <svg id="icon-moon" class="w-5 h-5 block dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+            </button>
+            <div id="auth-area" class="flex items-center gap-2">
+              <!-- filled by JS -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main class="flex-1">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="border-t border-slate-200 dark:border-slate-800 py-6 mt-auto">
+      <div class="max-w-7xl mx-auto px-4 text-center text-sm text-slate-500 dark:text-slate-400">
+        {{ settings.footer }}
+      </div>
+    </footer>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

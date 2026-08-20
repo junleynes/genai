@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+data/uploads/
+static/uploads/
+static/results/
+*.log
+.DS_Store
+node_modules/
+.next/
+static/auth-jump.html

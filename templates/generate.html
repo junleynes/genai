@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% block title %}Generate – {{ settings.app_name }}{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold tracking-tight">Create</h1>
+    <p class="text-slate-500 dark:text-slate-400 mt-1">Easy mode for quick results, Advanced for full control. Upload media when needed.</p>
+  </div>
+
+  <div class="flex flex-wrap gap-2 mb-6" id="type-tabs">
+    <button data-type="t2v" class="type-btn active px-3.5 py-2 rounded-xl text-sm font-medium border transition">Text → Video</button>
+    <button data-type="i2v" class="type-btn px-3.5 py-2 rounded-xl text-sm font-medium border transition">Image → Video</button>
+    <button data-type="ia2v" class="type-btn px-3.5 py-2 rounded-xl text-sm font-medium border transition">Image+Audio → Video</button>
+    <button data-type="v2v" class="type-btn px-3.5 py-2 rounded-xl text-sm font-medium border transition">Video → Video</button>
+    <button data-type="t2i" class="type-btn px-3.5 py-2 rounded-xl text-sm font-medium border transition">Text → Image</button>
+    <button data-type="i2i" class="type-btn px-3.5 py-2 rounded-xl text-sm font-medium border transition">Image → Image</button>
+  </div>
+
+  <div class="flex items-center gap-3 mb-8">
+    <span class="text-sm font-medium text-slate-600 dark:text-slate-400">Mode</span>
+    <div class="inline-flex p-1 rounded-xl bg-slate-200/80 dark:bg-slate-800">
+      <button id="mode-easy" class="mode-btn active px-4 py-1.5 rounded-lg text-sm font-medium transition">Easy</button>
+      <button id="mode-advanced" class="mode-btn px-4 py-1.5 rounded-lg text-sm font-medium transition">Advanced</button>
+    </div>
+  </div>
+
+  <form id="gen-form" class="space-y-6 p-6 sm:p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-lg" enctype="multipart/form-data">
+    <input type="hidden" name="job_type" id="job_type" value="t2v" />
+    <input type="hidden" name="mode" id="mode" value="easy" />
+
+    <div id="media-panel" class="grid sm:grid-cols-2 gap-4 hidden">
+      <div id="image-wrap" class="hidden">
+        <label class="block text-sm font-medium mb-1.5">Image <span class="text-red-500">*</span></label>
+        <input type="file" name="image" id="image-input" accept="image/png,image/jpeg,image/webp,image/jpg"
+          class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
+        <p class="text-xs text-slate-400 mt-1">PNG, JPG, WEBP — reference / start frame</p>
+        <div id="image-preview" class="mt-2 hidden"><img class="max-h-32 rounded-lg border border-slate-200 dark:border-slate-700" alt="preview" /></div>
+      </div>
+      <div id="audio-wrap" class="hidden">
+        <label class="block text-sm font-medium mb-1.5">Audio <span class="text-red-500">*</span></label>
+        <input type="file" name="audio" id="audio-input" accept="audio/mpeg,audio/wav,audio/mp3,audio/ogg,audio/x-wav"
+          class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
+        <p class="text-xs text-slate-400 mt-1">MP3, WAV, OGG — drives motion / lip-sync</p>
+      </div>
+      <div id="video-wrap" class="hidden">
+        <label class="block text-sm font-medium mb-1.5">Video <span class="text-red-500">*</span></label>
+        <input type="file" name="video" id="video-input" accept="video/mp4,video/webm,video/quicktime"
+          class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
+        <p class="text-xs text-slate-400 mt-1">MP4, WEBM — source for video-to-video</p>
+      </div>
+      <div id="end-image-wrap" class="hidden">
+        <label class="block text-sm font-medium mb-1.5">End image <span class="text-slate-400">(optional)</span></label>
+        <input type="file" name="end_image" id="end-image-input" accept="image/png,image/jpeg,image/webp"
+          class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
+        <p class="text-xs text-slate-400 mt-1">Target end frame for guided motion</p>
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1.5">Prompt <span id="prompt-req" class="text-red-500">*</span></label>
+      <textarea name="prompt" id="prompt" rows="4" placeholder="Describe the motion, style, or scene…"
+        class="w-full px-3.5 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 focus:ring-2 focus:ring-brand outline-none transition resize-y"></textarea>
+    </div>
+
+    <div id="neg-wrap" class="hidden">
+      <label class="block text-sm font-medium mb-1.5">Negative prompt</label>
+      <textarea name="negative_prompt" rows="2" placeholder="blurry, low quality, watermark…"
+        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 focus:ring-2 focus:ring-brand outline-none"></textarea>
+    </div>
+
+    <div id="easy-panel" class="grid sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium mb-1.5">Quality preset</label>
+        <select id="easy-preset" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
+          <option value="fast">Fast (480p, fewer steps)</option>
+          <option value="balanced" selected>Balanced (recommended)</option>
+          <option value="quality">High quality (more steps)</option>
+        </select>
+      </div>
+      <div id="easy-duration-wrap">
+        <label class="block text-sm font-medium mb-1.5">Duration</label>
+        <select id="easy-duration" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
+          <option value="2">~2 seconds</option>
+          <option value="4" selected>~4 seconds</option>
+          <option value="5">~5 seconds</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="adv-panel" class="hidden space-y-4">
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium mb-1.5">Resolution</label>
+          <select name="resolution" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
+            <option value="832x480">832×480 (low VRAM)</option>
+            <option value="1280x720" selected>1280×720</option>
+            <option value="1920x1080">1920×1080</option>
+            <option value="1024x1024">1024×1024 (image)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1.5">Steps</label>
+          <input type="number" name="steps" value="20" min="1" max="100" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1.5">Guidance scale</label>
+          <input type="number" name="guidance_scale" value="7.5" min="0" max="30" step="0.5" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1.5">Seed (-1 = random)</label>
+          <input type="number" name="seed" value="-1" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+        </div>
+        <div id="adv-duration-wrap">
+          <label class="block text-sm font-medium mb-1.5">Duration (seconds)</label>
+          <input type="number" name="duration_seconds" value="4" min="1" max="30" step="0.5" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1.5">FPS</label>
+          <input type="number" name="fps" value="16" min="8" max="30" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium mb-1.5">Model</label>
+          <select name="model" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
+            <option value="auto">Auto (best available)</option>
+            <option value="wan2.1-1.3b">Wan 2.1 1.3B (fast, 6GB+)</option>
+            <option value="wan2.1-14b">Wan 2.1 14B (quality)</option>
+            <option value="wan2.2">Wan 2.2</option>
+            <option value="ltx">LTX Video</option>
+            <option value="hunyuan">Hunyuan Video</option>
+            <option value="minimax-h3">MiniMax H3</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-3 pt-2">
+      <button type="submit" id="submit-btn" class="btn-brand px-6 py-2.5 rounded-xl font-semibold shadow-md disabled:opacity-60">Generate</button>
+      <a href="/jobs" class="text-sm text-slate-500 hover:text-brand transition">View my jobs →</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<style>
+  .type-btn { border-color: #e2e8f0; }
+  .dark .type-btn { border-color: #334155; }
+  .type-btn.active { background: linear-gradient(135deg, var(--brand), var(--brand-secondary)); color: white; border-color: transparent; }
+  .mode-btn.active { background: white; box-shadow: 0 1px 3px rgb(0 0 0 / 0.1); }
+  .dark .mode-btn.active { background: #1e293b; }
+</style>
+<script>
+if (!requireAuth()) throw new Error('auth');
+
+let currentType = 't2v';
+let currentMode = 'easy';
+
+function isVideoOut() { return ['t2v','i2v','ia2v','v2v'].includes(currentType); }
+function needsImage() { return ['i2v','i2i','ia2v'].includes(currentType) || currentType === 'v2v'; }
+function needsAudio() { return currentType === 'ia2v'; }
+function needsVideo() { return currentType === 'v2v'; }
+function promptRequired() { return ['t2v','t2i'].includes(currentType); }
+
+function updateUI() {
+  document.getElementById('job_type').value = currentType;
+  document.getElementById('mode').value = currentMode;
+  document.getElementById('easy-panel').classList.toggle('hidden', currentMode !== 'easy');
+  document.getElementById('adv-panel').classList.toggle('hidden', currentMode !== 'advanced');
+  document.getElementById('neg-wrap').classList.toggle('hidden', currentMode !== 'advanced');
+  document.getElementById('easy-duration-wrap').classList.toggle('hidden', !isVideoOut());
+  document.getElementById('adv-duration-wrap').classList.toggle('hidden', !isVideoOut());
+
+  const media = document.getElementById('media-panel');
+  const showMedia = needsImage() || needsAudio() || needsVideo() || currentType === 'v2v';
+  media.classList.toggle('hidden', !showMedia);
+
+  document.getElementById('image-wrap').classList.toggle('hidden', !(needsImage() || currentType === 'v2v'));
+  document.getElementById('audio-wrap').classList.toggle('hidden', !needsAudio());
+  document.getElementById('video-wrap').classList.toggle('hidden', !needsVideo());
+  document.getElementById('end-image-wrap').classList.toggle('hidden', currentType !== 'v2v' && currentType !== 'i2v');
+
+  document.getElementById('prompt-req').classList.toggle('hidden', !promptRequired());
+  document.getElementById('prompt').required = promptRequired();
+  document.getElementById('image-input').required = ['i2v','i2i','ia2v'].includes(currentType);
+  document.getElementById('audio-input').required = needsAudio();
+  document.getElementById('video-input').required = needsVideo();
+}
+
+document.querySelectorAll('.type-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentType = btn.dataset.type;
+    updateUI();
+  });
+});
+
+document.getElementById('mode-easy').addEventListener('click', () => {
+  currentMode = 'easy';
+  document.getElementById('mode-easy').classList.add('active');
+  document.getElementById('mode-advanced').classList.remove('active');
+  updateUI();
+});
+document.getElementById('mode-advanced').addEventListener('click', () => {
+  currentMode = 'advanced';
+  document.getElementById('mode-advanced').classList.add('active');
+  document.getElementById('mode-easy').classList.remove('active');
+  updateUI();
+});
+
+document.getElementById('image-input')?.addEventListener('change', (e) => {
+  const f = e.target.files?.[0];
+  const wrap = document.getElementById('image-preview');
+  if (!f) { wrap.classList.add('hidden'); return; }
+  wrap.querySelector('img').src = URL.createObjectURL(f);
+  wrap.classList.remove('hidden');
+});
+
+document.getElementById('gen-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting…';
+
+  const fd = new FormData(form);
+  fd.set('job_type', currentType);
+  fd.set('mode', currentMode);
+
+  if (currentMode === 'easy') {
+    const preset = document.getElementById('easy-preset').value;
+    let resolution = '832x480', steps = 20;
+    if (preset === 'fast') { resolution = '832x480'; steps = 15; }
+    else if (preset === 'balanced') { resolution = isVideoOut() ? '832x480' : '1024x1024'; steps = 20; }
+    else { resolution = isVideoOut() ? '1280x720' : '1024x1024'; steps = 30; }
+    fd.set('resolution', resolution);
+    fd.set('steps', String(steps));
+    if (isVideoOut()) fd.set('duration_seconds', document.getElementById('easy-duration').value);
+  }
+
+  try {
+    const token = localStorage.getItem(TOKEN_KEY);
+    const res = await fetch('/api/jobs', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token },
+      body: fd,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : (data.detail?.[0]?.msg || data.message || 'Failed'));
+    toast('Job queued: ' + (data.title || data.prompt || currentType), 'success');
+    setTimeout(() => location.href = '/jobs', 800);
+  } catch (err) {
+    toast(err.message || 'Failed to create job', 'error');
+    btn.disabled = false;
+    btn.textContent = 'Generate';
+  }
+});
+
+updateUI();
+</script>
+{% endblock %}

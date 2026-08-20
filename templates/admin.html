@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Admin – {{ settings.app_name }}{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+  <h1 class="text-3xl font-bold tracking-tight mb-2">Admin</h1>
+  <p class="text-slate-500 dark:text-slate-400 mb-10">Manage branding, Wan2GP connection, and users</p>
+
+  <div class="grid sm:grid-cols-3 gap-5">
+    <a href="/admin/branding" class="group p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-brand/50 hover:shadow-lg transition">
+      <div class="w-10 h-10 rounded-xl btn-brand flex items-center justify-center mb-4">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"/></svg>
+      </div>
+      <h2 class="font-semibold text-lg group-hover:text-brand transition">Branding</h2>
+      <p class="text-sm text-slate-500 mt-1">App name, tagline, footer, logo, favicon, colors</p>
+    </a>
+    <a href="/admin/server" class="group p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-brand/50 hover:shadow-lg transition">
+      <div class="w-10 h-10 rounded-xl btn-brand flex items-center justify-center mb-4">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
+      </div>
+      <h2 class="font-semibold text-lg group-hover:text-brand transition">Wan2GP Server</h2>
+      <p class="text-sm text-slate-500 mt-1">Connect to your Gradio / Wan2GP instance</p>
+    </a>
+    <a href="/admin/users" class="group p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-brand/50 hover:shadow-lg transition">
+      <div class="w-10 h-10 rounded-xl btn-brand flex items-center justify-center mb-4">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+      </div>
+      <h2 class="font-semibold text-lg group-hover:text-brand transition">Users</h2>
+      <p class="text-sm text-slate-500 mt-1">Roles, activate / deactivate accounts</p>
+    </a>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>requireAdmin();</script>
+{% endblock %}

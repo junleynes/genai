@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Jobs – {{ settings.app_name }}{% endblock %}
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-10">
+  <div class="flex flex-wrap items-center justify-between gap-4 mb-8">
+    <div>
+      <h1 class="text-3xl font-bold tracking-tight">Jobs</h1>
+      <p class="text-slate-500 dark:text-slate-400 mt-1">Generations attached to your account</p>
+    </div>
+    <a href="/generate" class="btn-brand px-4 py-2 rounded-xl text-sm font-semibold">New generation</a>
+  </div>
+
+  <div id="jobs-list" class="space-y-4">
+    <div class="text-center py-16 text-slate-400">Loading…</div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+if (!requireAuth()) throw new Error('auth');
+
+async function loadJobs() {
+  const el = document.getElementById('jobs-list');
+  try {
+    const jobs = await API.get('/api/jobs');
+    if (!jobs.length) {
+      el.innerHTML = `
+        <div class="text-center py-16 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">
+          <p class="text-slate-500 mb-4">No jobs yet</p>
+          <a href="/generate" class="text-brand font-medium hover:underline">Create your first generation →</a>
+        </div>`;
+      return;
+    }
+    el.innerHTML = jobs.map(j => `
+      <div class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition" data-id="${j.id}">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2 mb-1">
+              ${statusBadge(j.status)}
+              <span class="text-xs text-slate-500">${typeLabel(j.job_type)}</span>
+              <span class="text-xs text-slate-400">${j.mode}</span>
+              ${j.owner_name ? `<span class="text-xs text-slate-400">· ${escapeHtml(j.owner_name)}</span>` : ''}
+            </div>
+            <h3 class="font-semibold truncate">${escapeHtml(j.title || j.prompt)}</h3>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">${escapeHtml(j.prompt)}</p>
+            <p class="text-xs text-slate-400 mt-2">${new Date(j.created_at).toLocaleString()}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            ${j.status === 'processing' || j.status === 'queued' ? `
+              <div class="w-28">
+                <div class="h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                  <div class="progress-bar h-full bg-brand rounded-full" style="width:${j.progress || 0}%"></div>
+                </div>
+                <p class="text-[10px] text-slate-400 mt-0.5 text-right">${j.progress || 0}%</p>
+              </div>` : ''}
+            ${j.result_url && j.status === 'completed' ? `
+              <a href="${j.result_url}" target="_blank" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">Open result</a>
+            ` : ''}
+            <button onclick="deleteJob('${j.id}')" class="text-sm px-3 py-1.5 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30">Delete</button>
+          </div>
+        </div>
+        ${j.error ? `<p class="mt-3 text-sm text-red-600 dark:text-red-400">${escapeHtml(j.error)}</p>` : ''}
+        ${j.result_url && j.status === 'completed' && (j.job_type === 't2i' || j.job_type === 'i2i') ? `
+          <img src="${j.result_url}" alt="Result" class="mt-4 rounded-xl max-h-48 object-cover border border-slate-200 dark:border-slate-700" />
+        ` : ''}
+      </div>
+    `).join('');
+  } catch (err) {
+    el.innerHTML = `<p class="text-red-500">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function deleteJob(id) {
+  if (!confirm('Delete this job?')) return;
+  try {
+    await API.del('/api/jobs/' + id);
+    toast('Deleted', 'success');
+    loadJobs();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+loadJobs();
+// Poll while any job is active
+setInterval(() => {
+  const hasActive = document.querySelector('[data-id]') && 
+    [...document.querySelectorAll('[data-id]')].some(() => true);
+  loadJobs();
+}, 4000);
+</script>
+{% endblock %}
