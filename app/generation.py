@@ -553,43 +553,40 @@ async def process_job(job_id: str) -> None:
     root = (settings_cfg.get("wan2gp_root") or "").strip()
     mcp_url = (settings_cfg.get("wan2gp_mcp_url") or "").strip()
     enabled = bool(settings_cfg.get("wan2gp_enabled", False))
-    allow_mock = bool(settings_cfg.get("allow_mock_fallback", True))
 
     try:
-        if enabled and mcp_url:
+        if not enabled:
+            db.update_job(job_id, {
+                "status": "failed",
+                "progress": 0,
+                "error": "Wan2GP is disabled. Enable it in Admin → Wan2GP Server and set MCP URL.",
+            })
+            return
+
+        if mcp_url:
             ok = await asyncio.to_thread(_run_mcp_generate, job_id, job, settings_cfg)
             if ok:
                 return
-            if not allow_mock:
-                db.update_job(job_id, {
-                    "status": "failed",
-                    "progress": 0,
-                    "error": "MCP wangp_generate failed (mock disabled)",
-                })
-                return
-            logger.warning("MCP generate failed for %s – trying local API / mock", job_id)
+            # Keep existing error from _run_mcp_generate if set
+            cur = db.get_job(job_id) or {}
+            err = (cur.get("error") or "").strip() or "MCP wangp_generate failed"
+            db.update_job(job_id, {"status": "failed", "progress": 0, "error": err[:800]})
+            return
 
-        if enabled and root:
+        if root:
             ok = await asyncio.to_thread(_run_wangp_api, job_id, job, settings_cfg)
             if ok:
                 return
-            if not allow_mock:
-                db.update_job(job_id, {
-                    "status": "failed",
-                    "progress": 0,
-                    "error": "WanGP API call failed (mock fallback disabled)",
-                })
-                return
-            logger.warning("WanGP API failed for %s – mock fallback", job_id)
+            cur = db.get_job(job_id) or {}
+            err = (cur.get("error") or "").strip() or "WanGP local API failed"
+            db.update_job(job_id, {"status": "failed", "progress": 0, "error": err[:800]})
+            return
 
-        if enabled and not mcp_url and not root:
-            err = "Wan2GP enabled but neither wan2gp_mcp_url nor wan2gp_root is set."
-            if not allow_mock:
-                db.update_job(job_id, {"status": "failed", "progress": 0, "error": err})
-                return
-            logger.warning(err)
-
-        await _mock_generation(job_id, job)
+        db.update_job(job_id, {
+            "status": "failed",
+            "progress": 0,
+            "error": "No MCP URL or WanGP install path configured. Set MCP base URL in Admin → Wan2GP Server.",
+        })
     except Exception as e:
         logger.exception("Job %s failed", job_id)
         db.update_job(job_id, {

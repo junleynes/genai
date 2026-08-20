@@ -54,7 +54,7 @@ DEFAULT_SETTINGS = {
     "default_resolution": "1280x704",
     "default_steps": 8,
     "default_fps": "24",
-    "allow_mock_fallback": True,
+    "allow_mock_fallback": False,
 }
 
 

@@ -60,11 +60,7 @@
         class="w-4 h-4 rounded border-slate-300 text-brand focus:ring-brand" />
       <span class="text-sm font-medium">Enable WanGP generation</span>
     </label>
-    <label class="flex items-center gap-3 cursor-pointer">
-      <input type="checkbox" id="allow_mock_fallback" {% if settings.allow_mock_fallback is not defined or settings.allow_mock_fallback %}checked{% endif %}
-        class="w-4 h-4 rounded border-slate-300 text-brand focus:ring-brand" />
-      <span class="text-sm font-medium">Allow mock fallback if API fails</span>
-    </label>
+    <!-- mock fallback removed: failures show real errors -->
     <div class="flex flex-wrap gap-3">
       <button type="submit" class="btn-brand px-5 py-2.5 rounded-xl font-semibold">Save</button>
       <button type="button" id="test-btn" class="px-5 py-2.5 rounded-xl font-semibold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">Test connection</button>
@@ -102,7 +98,7 @@ function payload() {
     default_model_type: document.getElementById('default_model_type').value.trim(),
     default_resolution: document.getElementById('default_resolution').value.trim(),
     default_steps: parseInt(document.getElementById('default_steps').value, 10) || 8,
-    allow_mock_fallback: document.getElementById('allow_mock_fallback').checked,
+    allow_mock_fallback: false,
   };
 }
 
