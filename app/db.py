@@ -47,6 +47,7 @@ DEFAULT_SETTINGS = {
     "default_theme": "system",
     "wan2gp_url": "http://localhost:7860",
     "wan2gp_root": "",
+    "wan2gp_mcp_url": "http://127.0.0.1:8080/mcp",
     "wan2gp_enabled": False,
     "wan2gp_cli_args": "--attention sdpa --profile 4",
     "default_model_type": "ltx2_22B_distilled",

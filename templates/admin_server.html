@@ -12,8 +12,16 @@
   </p>
 
   <form id="server-form" class="space-y-5 p-6 sm:p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+    
     <div>
-      <label class="block text-sm font-medium mb-1.5">WanGP install path (required for real generation)</label>
+      <label class="block text-sm font-medium mb-1.5">MCP base URL (recommended)</label>
+      <input id="wan2gp_mcp_url" value="{{ settings.wan2gp_mcp_url or 'http://127.0.0.1:8080/mcp' }}" placeholder="http://127.0.0.1:8080/mcp"
+        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
+      <p class="text-xs text-slate-400 mt-1">WanGP Streamable HTTP MCP endpoint. Tools: <code>wangp_generate</code>, <code>wangp_get_job</code>, <code>wangp_list_models</code>, … Launch with <code>python wgp.py --mcp --mcp-transport streamable-http --mcp-host 0.0.0.0 --mcp-port 8080</code></p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1.5">WanGP install path (optional local fallback)</label>
       <input name="wan2gp_root" id="wan2gp_root" value="{{ settings.wan2gp_root or '' }}" placeholder="/path/to/Wan2GP"
         class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
       <p class="text-xs text-slate-400 mt-1">Folder that contains <code>wgp.py</code> and <code>shared/api.py</code>. Same machine as this app.</p>
@@ -88,6 +96,7 @@ function payload() {
   return {
     wan2gp_url: document.getElementById('wan2gp_url').value.trim(),
     wan2gp_root: document.getElementById('wan2gp_root').value.trim(),
+    wan2gp_mcp_url: document.getElementById('wan2gp_mcp_url').value.trim(),
     wan2gp_enabled: document.getElementById('wan2gp_enabled').checked,
     wan2gp_cli_args: document.getElementById('wan2gp_cli_args').value.trim(),
     default_model_type: document.getElementById('default_model_type').value.trim(),

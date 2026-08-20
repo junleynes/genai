@@ -83,6 +83,7 @@ class BrandingIn(BaseModel):
 class ServerConfigIn(BaseModel):
     wan2gp_url: str = ""
     wan2gp_root: str = ""
+    wan2gp_mcp_url: str = ""
     wan2gp_enabled: bool = False
     wan2gp_cli_args: str = "--attention sdpa --profile 4"
     default_model_type: str = "ltx2_22B_distilled"
@@ -162,6 +163,7 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
     return db.update_settings({
         "wan2gp_url": (body.wan2gp_url or "").strip(),
         "wan2gp_root": (body.wan2gp_root or "").strip(),
+        "wan2gp_mcp_url": (body.wan2gp_mcp_url or "").strip(),
         "wan2gp_enabled": body.wan2gp_enabled,
         "wan2gp_cli_args": (body.wan2gp_cli_args or "").strip(),
         "default_model_type": (body.default_model_type or "").strip() or "ltx2_22B_distilled",
@@ -173,7 +175,7 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
 
 @app.post("/api/admin/server/test")
 async def test_server(body: ServerConfigIn, admin: dict = Depends(auth.require_admin)):
-    result = await test_wan2gp_connection(url=body.wan2gp_url or '', root=body.wan2gp_root or '')
+    result = await test_wan2gp_connection(url=body.wan2gp_url or '', root=body.wan2gp_root or '', mcp_url=body.wan2gp_mcp_url or '')
     return result
 
 
