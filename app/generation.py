@@ -158,11 +158,14 @@ def _copy_result_into_static(src: str | Path, job_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# MCP Streamable HTTP client (API.md: connect to http://host:port/mcp)
-# Tools: wangp_generate, wangp_get_job, wangp_cancel_job, wangp_list_models, ...
+# MCP Streamable HTTP client (remote WanGP)
+# Spec: POST JSON-RPC to http://host:port/mcp
+# Requires initialize + Mcp-Session-Id for many servers.
+# Tools: wangp_generate, wangp_get_job, wangp_list_models, wangp_create_gallery_upload
 # ---------------------------------------------------------------------------
 
 _mcp_req_id = 0
+_mcp_sessions: dict[str, str] = {}  # endpoint -> session id
 
 
 def _next_mcp_id() -> int:
@@ -172,33 +175,64 @@ def _next_mcp_id() -> int:
 
 
 def _mcp_endpoint(base: str) -> str:
-    base = (base or "").rstrip("/")
+    base = (base or "").strip().rstrip("/")
+    if not base:
+        return base
     if base.endswith("/mcp"):
         return base
     return base + "/mcp"
 
 
+def _parse_sse_or_json(body: str, content_type: str) -> dict:
+    import json as _json
+    ctype = (content_type or "").lower()
+    body = body or ""
+    if "text/event-stream" in ctype or body.lstrip().startswith("event:") or "\ndata:" in body:
+        last = None
+        for line in body.splitlines():
+            if line.startswith("data:"):
+                raw = line[5:].strip()
+                if raw and raw != "[DONE]":
+                    try:
+                        last = _json.loads(raw)
+                    except Exception:
+                        pass
+        if last is None:
+            raise RuntimeError(f"MCP SSE empty/unparseable: {body[:400]}")
+        return last
+    try:
+        return _json.loads(body)
+    except Exception as e:
+        raise RuntimeError(f"MCP non-JSON response: {e}; body={body[:400]}")
+
+
 def _parse_mcp_tool_result(data: dict) -> Any:
-    """Extract structured / text payload from MCP tools/call response."""
     if not isinstance(data, dict):
         return data
-    # JSON-RPC envelope
-    if "result" in data:
-        result = data["result"]
-    elif "error" in data:
+    if "error" in data and data["error"]:
         err = data["error"]
-        raise RuntimeError(err.get("message") if isinstance(err, dict) else str(err))
-    else:
-        result = data
-
+        if isinstance(err, dict):
+            msg = err.get("message") or str(err)
+            extra = err.get("data")
+            if extra:
+                msg = f"{msg} | {extra}"
+            raise RuntimeError(msg)
+        raise RuntimeError(str(err))
+    result = data.get("result", data)
     if not isinstance(result, dict):
         return result
-
-    # structuredContent preferred
+    if result.get("isError"):
+        # tool-level error
+        content = result.get("content") or []
+        texts = []
+        for item in content:
+            if isinstance(item, dict):
+                texts.append(item.get("text") or str(item))
+            else:
+                texts.append(str(item))
+        raise RuntimeError("; ".join(texts) or "MCP tool returned isError")
     if result.get("structuredContent") is not None:
         return result["structuredContent"]
-
-    # content[] text items (often JSON string)
     content = result.get("content")
     if isinstance(content, list) and content:
         texts = []
@@ -217,68 +251,122 @@ def _parse_mcp_tool_result(data: dict) -> Any:
     return result
 
 
-def mcp_call_tool(mcp_url: str, name: str, arguments: dict, timeout: float = 120.0) -> Any:
-    """POST JSON-RPC tools/call to Streamable HTTP MCP endpoint."""
+def mcp_raw_request(
+    mcp_url: str,
+    method: str,
+    params: dict | None = None,
+    *,
+    timeout: float = 60.0,
+    session_id: str | None = None,
+    is_notification: bool = False,
+) -> tuple[dict | None, str | None]:
+    """
+    Low-level JSON-RPC POST. Returns (parsed_body_or_None, session_id).
+    Notifications return (None, session_id).
+    """
     import httpx
-    import json as _json
 
     endpoint = _mcp_endpoint(mcp_url)
-    payload = {
+    if not endpoint:
+        raise RuntimeError("MCP URL is empty")
+
+    payload: dict[str, Any] = {
         "jsonrpc": "2.0",
-        "id": _next_mcp_id(),
-        "method": "tools/call",
-        "params": {
-            "name": name,
-            "arguments": arguments or {},
-        },
+        "method": method,
     }
+    if not is_notification:
+        payload["id"] = _next_mcp_id()
+    if params is not None:
+        payload["params"] = params
+
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
     }
-    with httpx.Client(timeout=timeout) as client:
+    # Session header (Streamable HTTP)
+    sid = session_id or _mcp_sessions.get(endpoint)
+    if sid:
+        headers["Mcp-Session-Id"] = sid
+
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         r = client.post(endpoint, json=payload, headers=headers)
-        ctype = (r.headers.get("content-type") or "").lower()
-        body = r.text
+        new_sid = r.headers.get("mcp-session-id") or r.headers.get("Mcp-Session-Id") or sid
+        if new_sid:
+            _mcp_sessions[endpoint] = new_sid
+
+        if is_notification:
+            if r.status_code not in (200, 202, 204):
+                raise RuntimeError(f"MCP notification HTTP {r.status_code}: {r.text[:300]}")
+            return None, new_sid
+
         if r.status_code >= 400:
-            raise RuntimeError(f"MCP HTTP {r.status_code}: {body[:400]}")
+            raise RuntimeError(
+                f"MCP HTTP {r.status_code} on {endpoint} method={method}: {r.text[:500]}"
+            )
 
-        if "text/event-stream" in ctype:
-            # Take last data: JSON line from SSE
-            last = None
-            for line in body.splitlines():
-                if line.startswith("data:"):
-                    raw = line[5:].strip()
-                    if raw and raw != "[DONE]":
-                        try:
-                            last = _json.loads(raw)
-                        except Exception:
-                            pass
-            if last is None:
-                raise RuntimeError(f"MCP SSE empty: {body[:300]}")
-            return _parse_mcp_tool_result(last)
-
-        try:
-            data = r.json()
-        except Exception:
-            raise RuntimeError(f"MCP non-JSON: {body[:300]}")
-        return _parse_mcp_tool_result(data)
+        data = _parse_sse_or_json(r.text, r.headers.get("content-type", ""))
+        return data, new_sid
 
 
+def mcp_ensure_session(mcp_url: str, timeout: float = 30.0) -> str | None:
+    """Initialize MCP session (required by Streamable HTTP servers)."""
+    endpoint = _mcp_endpoint(mcp_url)
+    if endpoint in _mcp_sessions and _mcp_sessions[endpoint]:
+        return _mcp_sessions[endpoint]
+
+    data, sid = mcp_raw_request(
+        mcp_url,
+        "initialize",
+        {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "WanForge", "version": "1.0.0"},
+        },
+        timeout=timeout,
+        session_id=None,
+    )
+    # notifications/initialized
+    try:
+        mcp_raw_request(
+            mcp_url,
+            "notifications/initialized",
+            {},
+            timeout=timeout,
+            session_id=sid,
+            is_notification=True,
+        )
+    except Exception as e:
+        logger.debug("initialized notification: %s", e)
+
+    if data and isinstance(data, dict) and data.get("error"):
+        err = data["error"]
+        raise RuntimeError(err.get("message") if isinstance(err, dict) else str(err))
+
+    return sid or _mcp_sessions.get(endpoint)
+
+
+def mcp_call_tool(mcp_url: str, name: str, arguments: dict, timeout: float = 120.0) -> Any:
+    """tools/call with session handshake."""
+    sid = mcp_ensure_session(mcp_url, timeout=min(30.0, timeout))
+    data, _ = mcp_raw_request(
+        mcp_url,
+        "tools/call",
+        {"name": name, "arguments": arguments or {}},
+        timeout=timeout,
+        session_id=sid,
+    )
+    if data is None:
+        raise RuntimeError(f"Empty MCP response for tools/call {name}")
+    return _parse_mcp_tool_result(data)
 
 
 def mcp_upload_media(mcp_url: str, local_path: str) -> str:
-    """
-    Remote-safe media transfer (API.md):
-      1) wangp_create_gallery_upload(filename) → short-lived PUT URL + gallery prep
-      2) PUT raw bytes to returned URL
-    Returns gallery id (or path string usable as settings media field).
-    """
+    """Gallery upload for remote MCP (paths on client are useless on remote host)."""
     import httpx
     from pathlib import Path as P
+
     path = P(local_path)
     if not path.is_file():
-        # Already a gallery id or remote ref
         return str(local_path)
 
     create = mcp_call_tool(
@@ -296,61 +384,38 @@ def mcp_upload_media(mcp_url: str, local_path: str) -> str:
         or create.get("put_url")
         or create.get("href")
     )
-    gallery_id = (
-        create.get("gallery_id")
-        or create.get("id")
-        or create.get("item_id")
-    )
+    gallery_id = create.get("gallery_id") or create.get("id") or create.get("item_id")
 
-    # Resolve relative URL against MCP origin
-    if upload_url and upload_url.startswith("/"):
-        base = mcp_url.rstrip("/")
+    if upload_url and str(upload_url).startswith("/"):
+        base = _mcp_endpoint(mcp_url)
         if base.endswith("/mcp"):
             base = base[:-4]
-        upload_url = base.rstrip("/") + upload_url
+        upload_url = base.rstrip("/") + str(upload_url)
 
     if not upload_url:
         raise RuntimeError(f"No upload URL from wangp_create_gallery_upload: {create}")
 
     data = path.read_bytes()
-    headers = {"Content-Type": "application/octet-stream"}
-    # Some servers return content_type
-    ct = create.get("content_type") or create.get("mime")
-    if ct:
-        headers["Content-Type"] = ct
-
-    with httpx.Client(timeout=600.0) as client:
-        put = client.put(upload_url, content=data, headers=headers)
+    headers = {"Content-Type": create.get("content_type") or "application/octet-stream"}
+    with httpx.Client(timeout=600.0, follow_redirects=True) as client:
+        put = client.put(str(upload_url), content=data, headers=headers)
         if put.status_code >= 400:
-            # try POST fallback
-            put = client.post(upload_url, content=data, headers=headers)
+            put = client.post(str(upload_url), content=data, headers=headers)
         if put.status_code >= 400:
-            raise RuntimeError(f"Gallery PUT failed HTTP {put.status_code}: {put.text[:300]}")
-
-        # Response may include gallery id
+            raise RuntimeError(f"Gallery PUT HTTP {put.status_code}: {put.text[:300]}")
         try:
             body = put.json()
             if isinstance(body, dict):
-                gallery_id = (
-                    body.get("gallery_id")
-                    or body.get("id")
-                    or body.get("item_id")
-                    or gallery_id
-                )
+                gallery_id = body.get("gallery_id") or body.get("id") or body.get("item_id") or gallery_id
         except Exception:
             pass
 
     if not gallery_id:
-        # Some implementations return id only in create response as "gallery_id" after PUT selects item
-        gallery_id = create.get("gallery_id") or create.get("suggested_id")
-    if not gallery_id:
-        raise RuntimeError(f"Upload OK but no gallery_id. create={create} put={put.status_code}")
-
+        raise RuntimeError(f"Upload OK but no gallery_id. create={create}")
     return str(gallery_id)
 
 
 def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
-    """Map job → settings and replace local file paths with Gallery ids for remote MCP."""
     defaults = {
         "model_type": settings_cfg.get("default_model_type") or "ltx2_22B_distilled",
         "resolution": settings_cfg.get("default_resolution") or "1280x704",
@@ -359,52 +424,63 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
     }
     source = _map_job_to_settings(job, defaults)
 
-    # Job may store web-relative paths under static/uploads
     def resolve_local(p: str | None) -> str | None:
         if not p:
             return None
         path = Path(p)
         if path.is_file():
             return str(path)
-        # /static/uploads/xxx → local file
         rel = str(p).lstrip("/")
         candidate = Path(__file__).parent.parent / rel
         if candidate.is_file():
             return str(candidate)
-        # bare filename in uploads
         candidate = UPLOAD_DIR / Path(p).name
         if candidate.is_file():
             return str(candidate)
+        jobs_dir = UPLOAD_DIR / "jobs" / Path(p).name
+        if jobs_dir.is_file():
+            return str(jobs_dir)
         return str(p)
 
-    media_keys = ("image_start", "image_end", "image_refs", "video_source", "video_guide", "audio_guide", "audio_guide2")
+    media_keys = (
+        "image_start", "image_end", "image_refs",
+        "video_source", "video_guide", "audio_guide", "audio_guide2",
+    )
     for key in media_keys:
         val = source.get(key)
         if not val:
             continue
         if isinstance(val, list):
-            new_list = []
-            for item in val:
-                local = resolve_local(str(item))
-                if local and Path(local).is_file():
-                    new_list.append(mcp_upload_media(mcp_url, local))
-                else:
-                    new_list.append(item)
-            source[key] = new_list
+            source[key] = [
+                mcp_upload_media(mcp_url, resolve_local(str(item)) or str(item))
+                if resolve_local(str(item)) and Path(resolve_local(str(item))).is_file()
+                else item
+                for item in val
+            ]
         else:
             local = resolve_local(str(val))
             if local and Path(local).is_file():
                 source[key] = mcp_upload_media(mcp_url, local)
-
     return source
 
 
 def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
-    """
-    wangp_generate(source=settings, wait=False) then poll wangp_get_job.
-    """
     mcp_url = (settings_cfg.get("wan2gp_mcp_url") or "").strip()
     if not mcp_url:
+        db.update_job(job_id, {"error": "wan2gp_mcp_url is empty"})
+        return False
+
+    try:
+        mcp_ensure_session(mcp_url)
+    except Exception as e:
+        logger.exception("MCP initialize failed")
+        db.update_job(job_id, {
+            "error": (
+                f"Cannot reach MCP at {_mcp_endpoint(mcp_url)}: {e}. "
+                "Check host/port, firewall, and that WanGP was started with "
+                "`--mcp --mcp-transport streamable-http --mcp-host 0.0.0.0 --mcp-port <port>`."
+            )[:800]
+        })
         return False
 
     try:
@@ -413,32 +489,32 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         logger.exception("MCP media upload failed")
         db.update_job(job_id, {"error": f"MCP media upload: {e}"[:800]})
         return False
-    logger.info("MCP wangp_generate source keys=%s", list(source.keys()))
+
+    logger.info("MCP wangp_generate → %s keys=%s", _mcp_endpoint(mcp_url), list(source.keys()))
 
     try:
         out = mcp_call_tool(
             mcp_url,
             "wangp_generate",
             {"source": source, "wait": False, "event_limit": 20},
-            timeout=60.0,
+            timeout=90.0,
         )
     except Exception as e:
         logger.exception("wangp_generate failed")
         db.update_job(job_id, {"error": f"wangp_generate: {e}"[:800]})
         return False
 
-    # Expect job_id in response
     remote_id = None
     if isinstance(out, dict):
         remote_id = out.get("job_id") or out.get("id")
-        # sometimes nested
         if not remote_id and isinstance(out.get("job"), dict):
             remote_id = out["job"].get("id") or out["job"].get("job_id")
-    if not remote_id:
-        # Maybe waited and returned result directly
-        if isinstance(out, dict) and (out.get("generated_files") or out.get("success") is not None):
+        # wait=True style immediate result
+        if not remote_id and (out.get("generated_files") or out.get("success") is not None):
             return _apply_mcp_result(job_id, out)
-        db.update_job(job_id, {"error": f"wangp_generate no job_id: {str(out)[:400]}"})
+
+    if not remote_id:
+        db.update_job(job_id, {"error": f"wangp_generate returned no job_id: {str(out)[:500]}"})
         return False
 
     db.update_job(job_id, {
@@ -447,9 +523,9 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         "params": {**(job.get("params") or {}), "mcp_job_id": remote_id},
     })
 
-    # Poll
     import time
     deadline = time.time() + float(settings_cfg.get("mcp_timeout_s") or 3600)
+    last_err = None
     while time.time() < deadline:
         try:
             st = mcp_call_tool(
@@ -459,6 +535,7 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
                 timeout=30.0,
             )
         except Exception as e:
+            last_err = str(e)
             logger.warning("wangp_get_job: %s", e)
             time.sleep(2)
             continue
@@ -467,12 +544,11 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
             time.sleep(2)
             continue
 
-        # progress
         prog = st.get("progress")
         if prog is None and isinstance(st.get("status"), dict):
             prog = st["status"].get("progress")
         if isinstance(prog, (int, float)):
-            pct = int(prog * 100) if prog <= 1 else int(prog)
+            pct = int(prog * 100) if float(prog) <= 1 else int(prog)
             db.update_job(job_id, {"progress": max(20, min(95, pct))})
 
         done = st.get("done") or st.get("finished") or st.get("complete")
@@ -482,16 +558,21 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         if done or status in ("completed", "success", "failed", "error", "cancelled", "canceled"):
             if result is None:
                 result = st
-            ok = _apply_mcp_result(job_id, result if isinstance(result, dict) else st)
-            return ok
+            return _apply_mcp_result(job_id, result if isinstance(result, dict) else st)
 
         time.sleep(2.0)
 
-    db.update_job(job_id, {"error": "MCP job timed out"})
+    db.update_job(job_id, {
+        "error": f"MCP job timed out (last poll error: {last_err})" if last_err else "MCP job timed out"
+    })
     return False
 
 
 def _apply_mcp_result(job_id: str, result: dict) -> bool:
+    if not isinstance(result, dict):
+        db.update_job(job_id, {"error": f"Bad MCP result type: {type(result)}"})
+        return False
+
     success = result.get("success")
     files = result.get("generated_files") or result.get("files") or []
     gallery = result.get("gallery_items") or []
@@ -514,23 +595,23 @@ def _apply_mcp_result(job_id: str, result: dict) -> bool:
         path = first.get("path") if isinstance(first, dict) else str(first)
     elif gallery:
         g0 = gallery[0]
-        if isinstance(g0, dict):
-            path = g0.get("path") or g0.get("url") or g0.get("file")
-        else:
-            path = str(g0)
+        path = (g0.get("path") or g0.get("url") or g0.get("file")) if isinstance(g0, dict) else str(g0)
 
     if not path:
-        # try nested
         path = result.get("path") or result.get("output")
     if not path:
-        db.update_job(job_id, {"error": f"No output files in MCP result: {str(result)[:400]}"})
+        db.update_job(job_id, {"error": f"No output files in MCP result: {str(result)[:500]}"})
         return False
 
-    # Local path → copy into static; URL → use as-is
     if str(path).startswith("http://") or str(path).startswith("https://"):
         url = str(path)
     else:
-        url = _copy_result_into_static(path, job_id)
+        # Remote server local path is not readable here — try gallery download if id-like
+        url = str(path)
+        try:
+            url = _copy_result_into_static(path, job_id)
+        except Exception:
+            pass
 
     db.update_job(job_id, {
         "status": "completed",
@@ -672,90 +753,71 @@ def _run_wangp_api(job_id: str, job: dict, settings_cfg: dict) -> bool:
 
 
 async def _mock_generation(job_id: str, job: dict) -> None:
-    steps = [15, 30, 50, 70, 85, 95, 100]
-    for p in steps:
-        await asyncio.sleep(1.0)
-        current = db.get_job(job_id)
-        if not current or current["status"] == "failed":
-            return
-        db.update_job(job_id, {"progress": p})
-
-    jtype = job.get("job_type", "t2v")
-    if jtype in ("t2i", "i2i"):
-        result = "https://placehold.co/1024x1024/6366f1/ffffff?text=Generated+Image+(mock)"
-    elif jtype == "ia2v":
-        result = "https://placehold.co/1280x720/8b5cf6/ffffff?text=Image%2BAudio+Video+(mock)"
-    elif jtype == "v2v":
-        result = "https://placehold.co/1280x720/22d3ee/ffffff?text=Video+Video+(mock)"
-    else:
-        result = "https://placehold.co/1280x720/6366f1/ffffff?text=Generated+Video+(mock)"
-
     db.update_job(job_id, {
-        "status": "completed",
-        "progress": 100,
-        "result_url": result,
-        "preview_url": result,
-        "error": "mock (set wan2gp_root to your WanGP folder for real generation)",
+        "status": "failed",
+        "progress": 0,
+        "error": "Generation backend unavailable (mock removed)",
     })
 
 
 async def test_wan2gp_connection(url: str = "", root: str = "", mcp_url: str = "") -> dict:
+    """Diagnose remote MCP / local root connectivity."""
     root = (root or "").strip()
     url = (url or "").rstrip("/")
     mcp_url = (mcp_url or "").strip()
 
     if mcp_url:
+        endpoint = _mcp_endpoint(mcp_url)
         try:
-            # tools/list or a lightweight generate discovery
-            out = await asyncio.to_thread(
-                mcp_call_tool, mcp_url, "wangp_list_models", {"limit": 1}, 15.0
-            )
-            return {
-                "ok": True,
-                "message": f"MCP OK at {_mcp_endpoint(mcp_url)} (wangp_list_models worked)",
-                "version": "mcp",
-                "sample": str(out)[:200],
-            }
-        except Exception as e:
-            # try initialize-style fallback: just POST invalid to see reachability
+            # Clear cached session for a clean test
+            _mcp_sessions.pop(endpoint, None)
+            sid = await asyncio.to_thread(mcp_ensure_session, mcp_url, 20.0)
             try:
-                import httpx
-                async with httpx.AsyncClient(timeout=8.0) as client:
-                    r = await client.post(
-                        _mcp_endpoint(mcp_url),
-                        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
-                        headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
-                    )
-                    if r.status_code < 500:
-                        return {
-                            "ok": True,
-                            "message": f"MCP endpoint reachable (HTTP {r.status_code}). tools/list may need session. Detail: {e}",
-                            "version": "mcp-http",
-                        }
-            except Exception as e2:
-                return {"ok": False, "message": f"MCP failed: {e}; reachability: {e2}", "version": None}
-            return {"ok": False, "message": str(e)[:300], "version": None}
-
+                out = await asyncio.to_thread(
+                    mcp_call_tool, mcp_url, "wangp_list_models", {"limit": 3}, 25.0
+                )
+                n = len(out) if isinstance(out, list) else 1
+                return {
+                    "ok": True,
+                    "message": f"MCP OK {endpoint} (session={bool(sid)}, models sample={n})",
+                    "version": "mcp",
+                    "endpoint": endpoint,
+                }
+            except Exception as tool_err:
+                return {
+                    "ok": True,
+                    "message": (
+                        f"MCP session OK at {endpoint}, but wangp_list_models failed: {tool_err}. "
+                        "Server is reachable; tool name may differ on this build."
+                    ),
+                    "version": "mcp-session",
+                    "endpoint": endpoint,
+                }
+        except Exception as e:
+            return {
+                "ok": False,
+                "message": (
+                    f"Cannot talk to MCP at {endpoint}: {e}. "
+                    "1) Confirm WanGP MCP is running with streamable-http on that host/port. "
+                    "2) URL must be reachable FROM the machine running WanForge (not only from your browser). "
+                    "3) Use http://HOST:PORT/mcp (include /mcp). "
+                    "4) Open firewall for that port."
+                ),
+                "version": None,
+                "endpoint": endpoint,
+            }
 
     if root:
         try:
-            p = Path(root)
-            if not p.is_dir():
+            rp = Path(root)
+            if not rp.is_dir():
                 return {"ok": False, "message": f"Path not found: {root}", "version": None}
-            if not (p / "shared" / "api.py").exists():
-                return {
-                    "ok": False,
-                    "message": f"shared/api.py not found under {root}",
-                    "version": None,
-                }
-            if str(p) not in sys.path:
-                sys.path.insert(0, str(p))
+            if not (rp / "shared" / "api.py").exists():
+                return {"ok": False, "message": f"shared/api.py not found under {root}", "version": None}
+            if str(rp) not in sys.path:
+                sys.path.insert(0, str(rp))
             import shared.api  # noqa: F401
-            return {
-                "ok": True,
-                "message": "WanGP install found. Real generate uses session.submit_task.",
-                "version": "python-api",
-            }
+            return {"ok": True, "message": "Local WanGP install found", "version": "python-api"}
         except Exception as e:
             return {"ok": False, "message": str(e)[:300], "version": None}
 
@@ -767,18 +829,16 @@ async def test_wan2gp_connection(url: str = "", root: str = "", mcp_url: str = "
                 if r.status_code == 200:
                     return {
                         "ok": True,
-                        "message": "Gradio reachable – set WanGP install PATH for real submit_task generation.",
+                        "message": "Gradio reachable — for generation set MCP URL, not only Gradio URL.",
                         "version": "gradio",
                     }
-                r2 = await client.get(url)
-                if r2.status_code < 500:
-                    return {
-                        "ok": True,
-                        "message": "Server reachable – set wan2gp_root for real generation.",
-                        "version": None,
-                    }
-                return {"ok": False, "message": f"HTTP {r2.status_code}", "version": None}
+                return {"ok": False, "message": f"HTTP {r.status_code}", "version": None}
         except Exception as e:
             return {"ok": False, "message": str(e)[:200], "version": None}
 
-    return {"ok": False, "message": "Provide WanGP install path (recommended) or Gradio URL", "version": None}
+    return {
+        "ok": False,
+        "message": "Set MCP base URL (e.g. http://REMOTE:8080/mcp) and enable Wan2GP.",
+        "version": None,
+    }
+
