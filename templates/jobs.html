@@ -1,17 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Jobs – {{ settings.app_name }}{% endblock %}
 {% block content %}
-<div class="max-w-6xl mx-auto px-4 py-10">
+<div class="max-w-4xl mx-auto px-4 py-10">
   <div class="flex flex-wrap items-center justify-between gap-4 mb-8">
     <div>
       <h1 class="text-3xl font-bold tracking-tight">Jobs</h1>
-      <p class="text-slate-500 dark:text-slate-400 mt-1">Generations attached to your account</p>
+      <p class="text-slate-500 dark:text-slate-400 mt-1">Your generation queue and history</p>
     </div>
     <a href="/generate" class="btn-brand px-4 py-2 rounded-xl text-sm font-semibold">New generation</a>
   </div>
-
   <div id="jobs-list" class="space-y-4">
-    <div class="text-center py-16 text-slate-400">Loading…</div>
+    <p class="text-slate-500">Loading…</p>
   </div>
 </div>
 {% endblock %}
@@ -19,33 +18,62 @@
 <script>
 if (!requireAuth()) throw new Error('auth');
 
+function statusBadge(s) {
+  const map = {
+    queued: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+    processing: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+    completed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+    failed: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
+  };
+  return `<span class="text-xs font-semibold px-2 py-0.5 rounded-full ${map[s] || map.queued}">${s}</span>`;
+}
+
+function modelLabel(j) {
+  const p = j.params || {};
+  const mt = p.model_type || p.model || '';
+  if (!mt || mt === 'auto') return 'Auto / default';
+  return mt;
+}
+
+function paramChips(j) {
+  const p = j.params || {};
+  const chips = [];
+  chips.push(j.job_type || '?');
+  if (j.mode) chips.push(j.mode);
+  chips.push('model: ' + modelLabel(j));
+  if (p.resolution) chips.push(String(p.resolution));
+  if (p.steps) chips.push(p.steps + ' steps');
+  if (p.duration_seconds) chips.push(p.duration_seconds + 's');
+  if (p.guidance_scale) chips.push('cfg ' + p.guidance_scale);
+  if (p.seed !== undefined && p.seed !== null && Number(p.seed) !== -1) chips.push('seed ' + p.seed);
+  if (j.backend) chips.push(j.backend);
+  return chips.filter(Boolean).map(c =>
+    `<span class="inline-flex px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-600 dark:text-slate-300 font-mono">${escapeHtml(String(c))}</span>`
+  ).join(' ');
+}
+
 async function loadJobs() {
   const el = document.getElementById('jobs-list');
   try {
     const jobs = await API.get('/api/jobs');
     if (!jobs.length) {
-      el.innerHTML = `
-        <div class="text-center py-16 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">
-          <p class="text-slate-500 mb-4">No jobs yet</p>
-          <a href="/generate" class="text-brand font-medium hover:underline">Create your first generation →</a>
-        </div>`;
+      el.innerHTML = '<p class="text-slate-500">No jobs yet. <a href="/generate" class="text-brand underline">Create one</a>.</p>';
       return;
     }
     el.innerHTML = jobs.map(j => `
-      <div class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition" data-id="${j.id}">
+      <div class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800" data-id="${j.id}" data-status="${escapeHtml(j.status)}">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2 mb-1">
               ${statusBadge(j.status)}
-              <span class="text-xs text-slate-500">${typeLabel(j.job_type)}</span>
-              <span class="text-xs text-slate-400">${j.mode}</span>
-              ${j.owner_name ? `<span class="text-xs text-slate-400">· ${escapeHtml(j.owner_name)}</span>` : ''}
+              <span class="text-xs text-slate-400">${new Date(j.created_at).toLocaleString()}</span>
             </div>
             <h3 class="font-semibold truncate">${escapeHtml(j.title || j.prompt)}</h3>
             <p class="text-sm text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">${escapeHtml(j.prompt)}</p>
-            <p class="text-xs text-slate-400 mt-2">${new Date(j.created_at).toLocaleString()}</p>
+            <div class="flex flex-wrap gap-1.5 mt-3">${paramChips(j)}</div>
+            ${j.owner_email ? `<p class="text-xs text-slate-400 mt-2">Owner: ${escapeHtml(j.owner_name || '')} (${escapeHtml(j.owner_email)})</p>` : ''}
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             ${j.status === 'processing' || j.status === 'queued' ? `
               <div class="w-28">
                 <div class="h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
@@ -54,9 +82,12 @@ async function loadJobs() {
                 <p class="text-[10px] text-slate-400 mt-0.5 text-right">${j.progress || 0}%</p>
               </div>` : ''}
             ${j.result_url && j.status === 'completed' ? `
-              <a href="${j.result_url}" target="_blank" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">Open result</a>
+              <a href="${j.result_url}" target="_blank" rel="noopener" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">Open result</a>
             ` : ''}
-            <button onclick="deleteJob('${j.id}')" class="text-sm px-3 py-1.5 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30">Delete</button>
+            ${j.status === 'failed' ? `
+              <button type="button" onclick="retryJob('${j.id}')" class="text-sm px-3 py-1.5 rounded-lg bg-brand text-white hover:opacity-90 font-medium">Retry</button>
+            ` : ''}
+            <button type="button" onclick="deleteJob('${j.id}')" class="text-sm px-3 py-1.5 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30">Delete</button>
           </div>
         </div>
         ${j.status === 'failed' || j.error ? `<div class="mt-3 p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-sm text-red-700 dark:text-red-300">
@@ -73,6 +104,16 @@ async function loadJobs() {
   }
 }
 
+async function retryJob(id) {
+  try {
+    await API.post('/api/jobs/' + id + '/retry', {});
+    toast('Job re-queued', 'success');
+    loadJobs();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
 async function deleteJob(id) {
   if (!confirm('Delete this job?')) return;
   try {
@@ -85,11 +126,6 @@ async function deleteJob(id) {
 }
 
 loadJobs();
-// Poll while any job is active
-setInterval(() => {
-  const hasActive = document.querySelector('[data-id]') && 
-    [...document.querySelectorAll('[data-id]')].some(() => true);
-  loadJobs();
-}, 4000);
+setInterval(() => loadJobs(), 4000);
 </script>
 {% endblock %}

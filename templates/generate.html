@@ -28,6 +28,15 @@
     <input type="hidden" name="job_type" id="job_type" value="t2v" />
     <input type="hidden" name="mode" id="mode" value="easy" />
 
+    <div>
+      <label class="block text-sm font-medium mb-1.5">Model</label>
+      <select name="model" id="model-select" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm">
+        <option value="auto">Auto (server default)</option>
+      </select>
+      <p id="model-hint" class="text-xs text-slate-400 mt-1">Models filtered for this mode via MCP wangp_list_models.</p>
+    </div>
+
+
     <div id="media-panel" class="grid sm:grid-cols-2 gap-4 hidden">
       <div id="image-wrap" class="hidden">
         <label class="block text-sm font-medium mb-1.5">Image <span class="text-red-500">*</span></label>
@@ -160,6 +169,50 @@ function needsAudio() { return currentType === 'ia2v'; }
 function needsVideo() { return currentType === 'v2v'; }
 function promptRequired() { return ['t2v','t2i'].includes(currentType); }
 
+
+async function loadModels() {
+  const sel = document.getElementById('model-select');
+  const hint = document.getElementById('model-hint');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="auto">Loading models…</option>';
+  try {
+    const data = await API.get('/api/models?job_type=' + encodeURIComponent(currentType));
+    sel.innerHTML = '';
+    const optAuto = document.createElement('option');
+    optAuto.value = 'auto';
+    optAuto.textContent = 'Auto (server default)';
+    sel.appendChild(optAuto);
+    if (!data.ok) {
+      hint.textContent = data.message || 'Could not load models';
+      hint.className = 'text-xs text-amber-600 mt-1';
+      return;
+    }
+    const models = data.models || [];
+    if (!models.length) {
+      hint.textContent = 'No models matched this mode on the MCP server.';
+      hint.className = 'text-xs text-amber-600 mt-1';
+      return;
+    }
+    for (const m of models) {
+      const o = document.createElement('option');
+      o.value = m.model_type;
+      const bits = [m.name || m.model_type];
+      if (m.family) bits.push('[' + m.family + ']');
+      o.textContent = bits.join(' ');
+      o.title = m.model_type + ' · out=' + (m.main_output || []).join(',') + ' · in=' + (m.inputs || []).join(',');
+      sel.appendChild(o);
+    }
+    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+    hint.textContent = models.length + ' model(s) for ' + currentType + ' (filtered by main_output / inputs).';
+    hint.className = 'text-xs text-slate-400 mt-1';
+  } catch (err) {
+    sel.innerHTML = '<option value="auto">Auto (server default)</option>';
+    hint.textContent = 'Model list error: ' + err.message;
+    hint.className = 'text-xs text-red-500 mt-1';
+  }
+}
+
 function updateUI() {
   document.getElementById('job_type').value = currentType;
   document.getElementById('mode').value = currentMode;
@@ -191,6 +244,7 @@ document.querySelectorAll('.type-btn').forEach(btn => {
     btn.classList.add('active');
     currentType = btn.dataset.type;
     updateUI();
+    loadModels();
   });
 });
 
@@ -256,5 +310,6 @@ document.getElementById('gen-form').addEventListener('submit', async (e) => {
 });
 
 updateUI();
+loadModels();
 </script>
 {% endblock %}

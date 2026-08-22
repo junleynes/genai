@@ -26,7 +26,7 @@ logger = logging.getLogger("wanforge.generation")
 
 # Deployed-code fingerprint — GET /api/version must show this
 BACKEND_ID = "mcp-streamable-http-v2-no-mock"
-BACKEND_BUILT = "2026-08-23"
+BACKEND_BUILT = "2026-08-23-models"
 
 UPLOAD_DIR = Path(__file__).parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -559,6 +559,73 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         "error": f"MCP job timed out" + (f" (last: {last_err})" if last_err else "")
     })
     return False
+
+
+
+
+# job_type → MCP list filters (main_output / inputs)
+_JOB_TYPE_FILTERS = {
+    "t2v": {"main_output": "video"},
+    "i2v": {"main_output": "video", "inputs": "image"},
+    "ia2v": {"main_output": "video", "inputs": "image"},  # audio-capable video models
+    "v2v": {"main_output": "video", "inputs": "video"},
+    "t2i": {"main_output": "image"},
+    "i2i": {"main_output": "image", "inputs": "image"},
+}
+
+
+def list_models_for_job_type(mcp_url: str, job_type: str, limit: int = 80) -> list[dict]:
+    """Call wangp_list_models with filters; return compact UI-friendly list."""
+    filters = dict(_JOB_TYPE_FILTERS.get(job_type) or {"main_output": "video"})
+    filters["limit"] = limit
+    raw = mcp_call_tool(mcp_url, "wangp_list_models", filters, timeout=45.0)
+
+    items = raw if isinstance(raw, list) else (raw.get("models") or raw.get("items") or [])
+    if not isinstance(items, list):
+        items = []
+
+    out = []
+    for m in items:
+        if not isinstance(m, dict):
+            continue
+        meta = m.get("metadata") if isinstance(m.get("metadata"), dict) else {}
+        model_type = m.get("model_type") or meta.get("model_type") or m.get("id") or ""
+        name = m.get("name") or meta.get("name") or model_type
+        main_out = meta.get("main_output") or m.get("main_output") or []
+        inputs = meta.get("inputs") or m.get("inputs") or []
+        if isinstance(main_out, str):
+            main_out = [main_out]
+        if isinstance(inputs, str):
+            inputs = [inputs]
+        family = meta.get("family") or m.get("family") or ""
+        out.append({
+            "model_type": model_type,
+            "name": name,
+            "family": family,
+            "main_output": main_out,
+            "inputs": inputs,
+        })
+
+    # Client-side safety filter if MCP ignored filters
+    def ok(m: dict) -> bool:
+        mo = [str(x).lower() for x in (m.get("main_output") or [])]
+        inp = [str(x).lower() for x in (m.get("inputs") or [])]
+        if job_type in ("t2i", "i2i"):
+            if mo and "image" not in mo and "video" in mo:
+                return False
+            if job_type == "i2i" and inp and "image" not in inp:
+                return False
+        if job_type in ("t2v", "i2v", "ia2v", "v2v"):
+            if mo and "video" not in mo and "image" in mo and "video" not in mo:
+                return False
+            if job_type == "i2v" and inp and "image" not in inp:
+                return False
+            if job_type == "v2v" and inp and "video" not in inp:
+                return False
+        return bool(m.get("model_type"))
+
+    filtered = [m for m in out if ok(m)]
+    return filtered or out  # if over-filtered empty, return unfiltered MCP result
 
 
 async def process_job(job_id: str) -> None:

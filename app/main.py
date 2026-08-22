@@ -23,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from . import auth, db
-from .generation import process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT
+from .generation import process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("wanforge")
@@ -252,6 +252,52 @@ def get_job(job_id: str, user: dict = Depends(auth.get_current_user)):
     return job
 
 
+
+
+@app.get("/api/models")
+async def api_models(job_type: str = "t2v", user: dict = Depends(auth.get_current_user)):
+    """List WanGP models filtered for the selected generation mode."""
+    settings = db.get_settings()
+    mcp_url = (settings.get("wan2gp_mcp_url") or "").strip()
+    if not mcp_url or not settings.get("wan2gp_enabled"):
+        return {
+            "ok": False,
+            "models": [],
+            "message": "Configure MCP URL and enable Wan2GP in Admin to load models.",
+        }
+    try:
+        models = await asyncio.to_thread(list_models_for_job_type, mcp_url, job_type)
+        return {"ok": True, "models": models, "job_type": job_type}
+    except Exception as e:
+        return {"ok": False, "models": [], "message": str(e)[:400], "job_type": job_type}
+
+
+@app.post("/api/jobs/{job_id}/retry")
+async def retry_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(auth.get_current_user),
+):
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if user["role"] != "admin" and job["user_id"] != user["id"]:
+        raise HTTPException(403, "Not your job")
+    if job.get("status") not in ("failed", "completed"):
+        raise HTTPException(400, "Only failed (or completed) jobs can be retried")
+
+    db.update_job(job_id, {
+        "status": "queued",
+        "progress": 0,
+        "error": None,
+        "result_url": None,
+        "preview_url": None,
+        "completed_at": None,
+    })
+    background_tasks.add_task(process_job, job_id)
+    return db.get_job(job_id)
+
+
 @app.post("/api/jobs")
 async def create_job(
     background_tasks: BackgroundTasks,
@@ -315,6 +361,7 @@ async def create_job(
         "duration_seconds": duration_seconds,
         "fps": fps,
         "model": model,
+        "model_type": model if model and model != "auto" else None,
         "negative_prompt": negative_prompt,
         "image_url": image_url,
         "audio_url": audio_url,
