@@ -1172,6 +1172,10 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
     deadline = time.time() + float(settings_cfg.get("mcp_timeout_s") or 3600)
     last_err = None
     while time.time() < deadline:
+        cur = db.get_job(job_id)
+        if cur and cur.get("status") in ("cancelled", "canceled", "failed"):
+            logger.info("Job %s stopped locally (%s)", job_id, cur.get("status"))
+            return False
         try:
             st = mcp_call_tool(
                 mcp_url,

@@ -321,6 +321,47 @@ async def retry_job(
     return db.get_job(job_id)
 
 
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, user: dict = Depends(auth.get_current_user)):
+    """Cancel a queued/processing job; best-effort MCP wangp_cancel_job."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if user["role"] != "admin" and job["user_id"] != user["id"]:
+        raise HTTPException(403, "Not your job")
+    if job.get("status") not in ("queued", "processing"):
+        raise HTTPException(400, "Only queued or processing jobs can be cancelled")
+
+    # Flag local job first so background worker stops treating it as active
+    updated = db.update_job(job_id, {
+        "status": "cancelled",
+        "progress": 0,
+        "error": "Cancelled by user",
+    })
+
+    settings = db.get_settings()
+    mcp_url = (settings.get("wan2gp_mcp_url") or "").strip()
+    remote_id = (job.get("params") or {}).get("mcp_job_id")
+    if mcp_url and remote_id and settings.get("wan2gp_enabled"):
+        try:
+            await asyncio.to_thread(
+                mcp_call_tool,
+                mcp_url,
+                "wangp_cancel_job",
+                {"job_id": remote_id},
+                30.0,
+            )
+        except Exception as e:
+            # Local cancel still sticks; note remote failure
+            db.update_job(job_id, {
+                "error": f"Cancelled locally; MCP cancel: {e}"[:800],
+            })
+            updated = db.get_job(job_id)
+
+    return updated
+
+
 @app.post("/api/jobs")
 async def create_job(
     background_tasks: BackgroundTasks,
