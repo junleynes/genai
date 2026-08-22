@@ -94,8 +94,13 @@ async function loadJobs() {
           <div class="font-semibold mb-1">Generation failed</div>
           <div class="whitespace-pre-wrap break-words">${escapeHtml(j.error || 'Unknown error')}</div>
         </div>` : ''}
-        ${j.result_url && j.status === 'completed' && (j.job_type === 't2i' || j.job_type === 'i2i') ? `
-          <img src="${j.result_url}" alt="Result" class="mt-4 rounded-xl max-h-48 object-cover border border-slate-200 dark:border-slate-700" />
+        ${j.result_url && j.status === 'completed' ? `
+          <div class="mt-4">
+            ${/\.(mp4|webm|mov)(\?|$)/i.test(j.result_url) || (j.job_type && j.job_type.includes('2v') && !j.job_type.includes('2i'))
+              ? `<video src="${j.result_url}" controls class="rounded-xl max-h-56 w-full bg-black border border-slate-200 dark:border-slate-700"></video>`
+              : `<img src="${j.result_url}" alt="Result" class="rounded-xl max-h-56 object-contain border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950" />`
+            }
+          </div>
         ` : ''}
       </div>
     `).join('');

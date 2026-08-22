@@ -26,7 +26,7 @@ logger = logging.getLogger("wanforge.generation")
 
 # Deployed-code fingerprint — GET /api/version must show this
 BACKEND_ID = "mcp-streamable-http-v2-no-mock"
-BACKEND_BUILT = "2026-08-23-models"
+BACKEND_BUILT = "2026-08-23-remote-download"
 
 UPLOAD_DIR = Path(__file__).parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -414,7 +414,150 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
     return source
 
 
-def _apply_mcp_result(job_id: str, result: dict) -> bool:
+def _mcp_origin(mcp_url: str) -> str:
+    ep = _mcp_endpoint(mcp_url).rstrip("/")
+    if ep.endswith("/mcp"):
+        ep = ep[:-4]
+    return ep.rstrip("/")
+
+
+def _save_bytes_result(job_id: str, data: bytes, ext: str = ".png") -> str:
+    if not ext.startswith("."):
+        ext = "." + ext
+    # sniff
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        ext = ".png"
+    elif data[:3] == b"\xff\xd8\xff":
+        ext = ".jpg"
+    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        ext = ".webp"
+    elif data[:4] == b"\x00\x00\x00\x18" or data[4:8] == b"ftyp":
+        ext = ".mp4"
+    elif data[:4] == b"\x1aE\xdf\xa3":
+        ext = ".webm"
+    dest = RESULTS_DIR / f"{job_id}{ext}"
+    dest.write_bytes(data)
+    return f"/static/results/{dest.name}"
+
+
+def mcp_download_gallery_item(mcp_url: str, gallery_id: str, job_id: str) -> str:
+    """Use wangp_create_gallery_download then GET the short-lived URL onto this server."""
+    create = mcp_call_tool(
+        mcp_url,
+        "wangp_create_gallery_download",
+        {"gallery_id": gallery_id},
+        timeout=60.0,
+    )
+    if not isinstance(create, dict):
+        raise RuntimeError(f"gallery download create failed: {create}")
+
+    url = (
+        create.get("url")
+        or create.get("download_url")
+        or create.get("get_url")
+        or create.get("href")
+    )
+    if not url:
+        raise RuntimeError(f"No download URL from wangp_create_gallery_download: {create}")
+
+    if str(url).startswith("/"):
+        url = _mcp_origin(mcp_url) + str(url)
+
+    with httpx.Client(timeout=600.0, follow_redirects=True) as client:
+        r = client.get(str(url))
+        if r.status_code >= 400:
+            raise RuntimeError(f"Gallery download HTTP {r.status_code}: {r.text[:200]}")
+        ct = (r.headers.get("content-type") or "").lower()
+        ext = ".bin"
+        if "png" in ct:
+            ext = ".png"
+        elif "jpeg" in ct or "jpg" in ct:
+            ext = ".jpg"
+        elif "webp" in ct:
+            ext = ".webp"
+        elif "mp4" in ct or "video" in ct:
+            ext = ".mp4"
+        elif "webm" in ct:
+            ext = ".webm"
+        # filename from content-disposition
+        cd = r.headers.get("content-disposition") or ""
+        if "filename=" in cd:
+            import re
+            m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', cd, re.I)
+            if m:
+                name = m.group(1).strip()
+                if "." in name:
+                    ext = "." + name.rsplit(".", 1)[-1].lower()[:8]
+        return _save_bytes_result(job_id, r.content, ext)
+
+
+def mcp_download_remote_file(mcp_url: str, remote_path: str, job_id: str) -> str:
+    """
+    Remote WanGP paths are not on this disk. Prefer gallery download;
+    also try common HTTP static mounts under the MCP origin.
+    """
+    # If already a full URL, fetch it
+    if str(remote_path).startswith(("http://", "https://")):
+        with httpx.Client(timeout=600.0, follow_redirects=True) as client:
+            r = client.get(str(remote_path))
+            if r.status_code >= 400:
+                raise RuntimeError(f"Download HTTP {r.status_code}")
+            ext = Path(str(remote_path).split("?")[0]).suffix or ".bin"
+            return _save_bytes_result(job_id, r.content, ext)
+
+    # Local path only works if shared filesystem
+    local = Path(remote_path)
+    if local.is_file():
+        return _copy_result_into_static(local, job_id)
+
+    origin = _mcp_origin(mcp_url)
+    name = Path(str(remote_path)).name
+    # Heuristic paths some installs expose
+    candidates = [
+        f"{origin}/file={remote_path}",
+        f"{origin}/media/{name}",
+        f"{origin}/outputs/{name}",
+        f"{origin}/static/outputs/{name}",
+        f"{origin}/download/{name}",
+    ]
+    last_err = None
+    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+        for u in candidates:
+            try:
+                r = client.get(u)
+                if r.status_code == 200 and r.content and len(r.content) > 64:
+                    ext = Path(name).suffix or ".bin"
+                    return _save_bytes_result(job_id, r.content, ext)
+            except Exception as e:
+                last_err = e
+    raise RuntimeError(
+        f"Cannot fetch remote file {remote_path!r} onto WanForge host "
+        f"(not local, gallery download needed). last={last_err}"
+    )
+
+
+def _extract_gallery_id(obj: Any) -> str | None:
+    if obj is None:
+        return None
+    if isinstance(obj, str):
+        # bare id
+        if obj and not obj.startswith("/") and "\\" not in obj and len(obj) < 120:
+            return obj
+        return None
+    if isinstance(obj, dict):
+        for k in ("gallery_id", "id", "item_id", "media_id"):
+            v = obj.get(k)
+            if v is not None and str(v).strip():
+                # skip if looks like filesystem path
+                s = str(v)
+                if "/" in s or "\\" in s or s.endswith((".png", ".jpg", ".mp4", ".webp")):
+                    continue
+                return s
+    return None
+
+
+def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "") -> bool:
+    """Copy/download result onto *this* server so the browser can preview it."""
     if not isinstance(result, dict):
         db.update_job(job_id, {"error": f"Bad MCP result type: {type(result)}"})
         return False
@@ -431,25 +574,69 @@ def _apply_mcp_result(job_id: str, result: dict) -> bool:
         db.update_job(job_id, {"error": ("; ".join(msgs) or "MCP generation failed")[:800]})
         return False
 
-    path = None
-    if files:
-        first = files[0]
-        path = first.get("path") if isinstance(first, dict) else str(first)
-    elif gallery:
-        g0 = gallery[0]
-        path = (g0.get("path") or g0.get("url") or g0.get("file")) if isinstance(g0, dict) else str(g0)
-    path = path or result.get("path") or result.get("output")
-    if not path:
-        db.update_job(job_id, {"error": f"No output in MCP result: {str(result)[:500]}"})
-        return False
+    url = None
+    transfer_errors = []
 
-    if str(path).startswith(("http://", "https://")):
-        url = str(path)
-    else:
-        try:
-            url = _copy_result_into_static(path, job_id)
-        except Exception:
-            url = str(path)
+    # 1) Gallery items → wangp_create_gallery_download (correct for remote MCP)
+    for g in gallery if isinstance(gallery, list) else []:
+        gid = _extract_gallery_id(g)
+        if not gid and isinstance(g, dict):
+            # sometimes id is nested
+            gid = _extract_gallery_id(g.get("item") or g.get("media"))
+        if gid and mcp_url:
+            try:
+                url = mcp_download_gallery_item(mcp_url, gid, job_id)
+                break
+            except Exception as e:
+                transfer_errors.append(f"gallery {gid}: {e}")
+                logger.warning("gallery download failed: %s", e)
+
+    # 2) generated_files may include gallery refs or remote paths
+    if not url:
+        for f in files if isinstance(files, list) else []:
+            gid = _extract_gallery_id(f)
+            remote_path = None
+            if isinstance(f, dict):
+                remote_path = f.get("path") or f.get("file") or f.get("url") or f.get("filename")
+                if not gid:
+                    gid = _extract_gallery_id(f.get("gallery_id") or f.get("id"))
+            else:
+                remote_path = str(f)
+
+            if gid and mcp_url:
+                try:
+                    url = mcp_download_gallery_item(mcp_url, str(gid), job_id)
+                    break
+                except Exception as e:
+                    transfer_errors.append(str(e))
+
+            if remote_path and mcp_url:
+                try:
+                    url = mcp_download_remote_file(mcp_url, str(remote_path), job_id)
+                    break
+                except Exception as e:
+                    transfer_errors.append(str(e))
+                    # last resort: if file exists locally (shared mount)
+                    if Path(str(remote_path)).is_file():
+                        url = _copy_result_into_static(remote_path, job_id)
+                        break
+
+    if not url:
+        path = result.get("path") or result.get("output")
+        if path and mcp_url:
+            try:
+                url = mcp_download_remote_file(mcp_url, str(path), job_id)
+            except Exception as e:
+                transfer_errors.append(str(e))
+
+    if not url:
+        msg = (
+            "Generation finished on remote WanGP, but the file could not be transferred to this app. "
+            "Remote paths are not readable from WanForge. "
+            + ("; ".join(transfer_errors)[:500] if transfer_errors else str(result)[:300])
+        )
+        db.update_job(job_id, {"error": msg[:800], "status": "failed", "progress": 0})
+        return False
 
     db.update_job(job_id, {
         "status": "completed",
@@ -458,7 +645,9 @@ def _apply_mcp_result(job_id: str, result: dict) -> bool:
         "preview_url": url,
         "error": None,
     })
+    logger.info("Job %s result stored locally at %s", job_id, url)
     return True
+
 
 
 def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
@@ -506,7 +695,7 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         if not remote_id and isinstance(out.get("job"), dict):
             remote_id = out["job"].get("id") or out["job"].get("job_id")
         if not remote_id and (out.get("generated_files") is not None or out.get("success") is not None):
-            return _apply_mcp_result(job_id, out)
+            return _apply_mcp_result(job_id, out, mcp_url)
 
     if not remote_id:
         db.update_job(job_id, {"error": f"wangp_generate no job_id: {str(out)[:500]}"})
@@ -551,7 +740,7 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         if done or status in ("completed", "success", "failed", "error", "cancelled", "canceled"):
             if result is None:
                 result = st
-            return _apply_mcp_result(job_id, result if isinstance(result, dict) else st)
+            return _apply_mcp_result(job_id, result if isinstance(result, dict) else st, mcp_url)
 
         time.sleep(2.0)
 
