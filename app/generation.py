@@ -26,7 +26,7 @@ logger = logging.getLogger("genai.generation")
 
 # Deployed-code fingerprint — GET /api/version must show this
 BACKEND_ID = "mcp-streamable-http-v2-no-mock"
-BACKEND_BUILT = "2026-08-23-mcp-gallery-v2"
+BACKEND_BUILT = "2026-08-23-no-mcp-file-probe"
 
 UPLOAD_DIR = Path(__file__).parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -653,8 +653,8 @@ def mcp_fetch_result_via_gallery(mcp_url: str, job_id: str, remote_path: str | N
 
 def mcp_download_remote_file(mcp_url: str, remote_path: str, job_id: str, gradio_url: str = "") -> str:
     """
-    Only used when Gradio URL is explicitly configured.
-    Does NOT probe random ports (avoids WinError 10061 noise when MCP-only).
+    Only used when Gradio URL is explicitly set and is NOT the MCP endpoint.
+    MCP-only installs must use gallery download — never probe /file= on MCP port.
     """
     remote_path = str(remote_path).strip().strip('"').strip("'")
     if not remote_path:
@@ -672,18 +672,36 @@ def mcp_download_remote_file(mcp_url: str, remote_path: str, job_id: str, gradio
     if local.is_file():
         return _copy_result_into_static(local, job_id)
 
-    if not (gradio_url or "").strip():
+    gurl = (gradio_url or "").strip().rstrip("/")
+    if not gurl:
         raise RuntimeError("not local, gallery download needed (no Gradio URL configured)")
 
+    # Refuse Gradio probes against the MCP origin (same host:port as /mcp/)
+    try:
+        from urllib.parse import urlparse
+        mcp_o = urlparse(_mcp_origin(mcp_url))
+        gr_o = urlparse(gurl)
+        if mcp_o.hostname and gr_o.hostname and mcp_o.hostname == gr_o.hostname and (
+            (mcp_o.port or (443 if mcp_o.scheme == "https" else 80))
+            == (gr_o.port or (443 if gr_o.scheme == "https" else 80))
+        ):
+            raise RuntimeError(
+                "Gradio URL matches MCP host:port — /file= will 404. "
+                "Clear Gradio URL for MCP-only, or set real Gradio (e.g. :7860)."
+            )
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+
     from urllib.parse import quote
-    o = gradio_url.rstrip("/")
     name = Path(remote_path.replace("\\", "/")).name
     path_variants = [remote_path, remote_path.replace("\\", "/")]
     candidates = []
     for pv in path_variants:
-        candidates.append(f"{o}/file={pv}")
-        candidates.append(f"{o}/gradio_api/file={pv}")
-        candidates.append(f"{o}/file={quote(pv, safe=':/\\\\')}")
+        candidates.append(f"{gurl}/file={pv}")
+        candidates.append(f"{gurl}/gradio_api/file={pv}")
+        candidates.append(f"{gurl}/file={quote(pv, safe=':/\\\\')}")
 
     last_err = None
     with httpx.Client(timeout=60.0, follow_redirects=True) as client:
@@ -732,188 +750,6 @@ def _artifact_to_local_file(job_id: str, art: dict) -> str | None:
             data = bytes(val)
             return _save_bytes_result(job_id, data, ".png")
     return None
-
-
-def mcp_fetch_result_via_gallery(mcp_url: str, job_id: str, remote_path: str | None = None) -> str:
-    """
-    MCP-only transfer (no Gradio):
-      1) wangp_list_gallery → find item matching output filename
-      2) wangp_create_gallery_download(gallery_id) → GET bytes
-      3) wangp_get_gallery_selection as fallback
-    """
-    name = Path(str(remote_path).replace("\\", "/")).name if remote_path else None
-    stem = Path(name).stem if name else None
-
-    items = []
-    for tool, args in (
-        ("wangp_list_gallery", {}),
-        ("wangp_list_gallery", {"media_type": "image"}),
-        ("wangp_list_gallery", {"media_type": "all"}),
-        ("wangp_get_gallery_selection", {"media_type": "all"}),
-        ("wangp_get_gallery_selection", {}),
-    ):
-        try:
-            raw = mcp_call_tool(mcp_url, tool, args, timeout=45.0)
-        except Exception as e:
-            logger.debug("%s failed: %s", tool, e)
-            continue
-        batch = raw if isinstance(raw, list) else (
-            (raw or {}).get("items")
-            or (raw or {}).get("gallery")
-            or (raw or {}).get("gallery_items")
-            or (raw or {}).get("images")
-            or (raw or {}).get("videos")
-            or ([raw] if isinstance(raw, dict) and (raw.get("gallery_id") or raw.get("id") or raw.get("path")) else [])
-        )
-        if isinstance(batch, dict):
-            batch = list(batch.values())
-        if isinstance(batch, list):
-            items.extend([x for x in batch if isinstance(x, dict)])
-        if items:
-            break
-
-    if not items:
-        raise RuntimeError(
-            "wangp_list_gallery returned no items. "
-            "Outputs must appear in the MCP Gallery for download without Gradio."
-        )
-
-    def score(it: dict) -> int:
-        s = 0
-        p = str(it.get("path") or it.get("file") or it.get("filename") or "")
-        n = Path(p.replace("\\", "/")).name
-        gid = it.get("gallery_id") or it.get("id")
-        if name and n == name:
-            s += 100
-        if stem and stem in n:
-            s += 50
-        if name and name in p:
-            s += 40
-        if remote_path and remote_path.replace("\\", "/") in p.replace("\\", "/"):
-            s += 80
-        if gid:
-            s += 1
-        # prefer newest if timestamp-like fields exist
-        for k in ("created_at", "mtime", "time", "index"):
-            if it.get(k) is not None:
-                try:
-                    s += int(float(it[k])) % 1000
-                except Exception:
-                    pass
-        return s
-
-    items_sorted = sorted(items, key=score, reverse=True)
-    errors = []
-    for it in items_sorted[:8]:
-        gid = it.get("gallery_id") or it.get("id") or it.get("item_id")
-        if not gid:
-            continue
-        # skip if looks like path
-        if "/" in str(gid) or "\\" in str(gid):
-            continue
-        try:
-            return mcp_download_gallery_item(mcp_url, str(gid), job_id)
-        except Exception as e:
-            errors.append(f"{gid}: {e}")
-    raise RuntimeError(
-        "Gallery items found but download failed: " + ("; ".join(errors)[:400] if errors else "no gallery_id")
-    )
-
-
-def mcp_download_remote_file(mcp_url: str, remote_path: str, job_id: str, gradio_url: str = "") -> str:
-    """
-    Remote WanGP paths are not on this disk. Try:
-      1) direct http(s) URL
-      2) local path (shared disk)
-      3) Gradio /file= and /gradio_api/file= (same host or wan2gp_url)
-      4) MCP origin heuristics
-    """
-    remote_path = str(remote_path).strip().strip('"').strip("'")
-    if not remote_path:
-        raise RuntimeError("empty remote path")
-
-    if remote_path.startswith(("http://", "https://")):
-        with httpx.Client(timeout=600.0, follow_redirects=True) as client:
-            r = client.get(remote_path)
-            if r.status_code >= 400:
-                raise RuntimeError(f"Download HTTP {r.status_code}")
-            ext = Path(remote_path.split("?")[0]).suffix or ".bin"
-            return _save_bytes_result(job_id, r.content, ext)
-
-    local = Path(remote_path)
-    if local.is_file():
-        return _copy_result_into_static(local, job_id)
-
-    name = Path(remote_path.replace("\\", "/")).name
-    # Windows path → use as Gradio file= parameter (Gradio accepts absolute paths on server)
-    # Encode carefully: Gradio often wants the path as-is after file=
-    from urllib.parse import quote
-
-    origins = []
-    if gradio_url:
-        origins.append(gradio_url.rstrip("/"))
-    origin = _mcp_origin(mcp_url)
-    if origin:
-        origins.append(origin)
-        # common: MCP on 8080, Gradio on 7860 same host
-        try:
-            from urllib.parse import urlparse
-            u = urlparse(origin)
-            if u.hostname:
-                origins.append(f"{u.scheme}://{u.hostname}:7860")
-                origins.append(f"{u.scheme}://{u.hostname}:7861")
-        except Exception:
-            pass
-
-    # unique preserve order
-    seen = set()
-    uniq_origins = []
-    for o in origins:
-        if o and o not in seen:
-            seen.add(o)
-            uniq_origins.append(o)
-
-    path_variants = [
-        remote_path,
-        remote_path.replace("\\", "/"),
-        # Gradio on Windows sometimes wants forward slashes
-        remote_path.replace("\\", "/"),
-    ]
-    # Also try just filename under outputs
-    path_variants.append(name)
-
-    candidates = []
-    for o in uniq_origins:
-        for pv in path_variants:
-            # Gradio classic
-            candidates.append(f"{o}/file={pv}")
-            candidates.append(f"{o}/file={quote(pv, safe=':/\\\\')}")
-            candidates.append(f"{o}/gradio_api/file={pv}")
-            candidates.append(f"{o}/gradio_api/file={quote(pv, safe=':/\\\\')}")
-        candidates.append(f"{o}/media/{name}")
-        candidates.append(f"{o}/outputs/{name}")
-        candidates.append(f"{o}/static/outputs/{name}")
-
-    last_err = None
-    with httpx.Client(timeout=60.0, follow_redirects=True) as client:
-        for u in candidates:
-            try:
-                r = client.get(u)
-                if r.status_code == 200 and r.content and len(r.content) > 100:
-                    # skip HTML error pages
-                    ct = (r.headers.get("content-type") or "").lower()
-                    if "text/html" in ct and b"<html" in r.content[:200].lower():
-                        continue
-                    ext = Path(name).suffix or ".bin"
-                    return _save_bytes_result(job_id, r.content, ext)
-                last_err = f"HTTP {r.status_code} for {u[:80]}"
-            except Exception as e:
-                last_err = str(e)
-
-    raise RuntimeError(
-        f"Cannot fetch remote file {remote_path!r} onto GenAI host "
-        f"(not local, gallery download needed). last={last_err}"
-    )
 
 
 
