@@ -24,6 +24,10 @@ from . import db
 
 logger = logging.getLogger("wanforge.generation")
 
+# Deployed-code fingerprint — GET /api/version must show this
+BACKEND_ID = "mcp-streamable-http-v2-no-mock"
+BACKEND_BUILT = "2026-08-23"
+
 UPLOAD_DIR = Path(__file__).parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR = Path(__file__).parent.parent / "static" / "results"
@@ -563,7 +567,7 @@ async def process_job(job_id: str) -> None:
     if not job:
         return
 
-    db.update_job(job_id, {"status": "processing", "progress": 5, "error": None})
+    db.update_job(job_id, {"status": "processing", "progress": 5, "error": None, "backend": BACKEND_ID})
     settings_cfg = db.get_settings()
     mcp_url = (settings_cfg.get("wan2gp_mcp_url") or "").strip()
     enabled = bool(settings_cfg.get("wan2gp_enabled", False))

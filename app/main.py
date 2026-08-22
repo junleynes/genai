@@ -23,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from . import auth, db
-from .generation import process_job, test_wan2gp_connection
+from .generation import process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("wanforge")
@@ -33,6 +33,18 @@ app = FastAPI(title="WanForge", version="1.0.0")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
+
+
+@app.get("/api/version")
+def api_version():
+    """Use this to verify the deployed code is MCP (not Gradio mock)."""
+    return {
+        "app": "WanForge",
+        "backend": BACKEND_ID,
+        "built": BACKEND_BUILT,
+        "mock": False,
+        "expects_mcp_url_suffix": "/mcp/",
+    }
 
 @app.on_event("startup")
 def startup():
