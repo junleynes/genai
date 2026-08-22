@@ -9,7 +9,7 @@ from jose import JWTError, jwt
 
 from . import db
 
-SECRET_KEY = "wanforge-secret-change-me-in-production-2026"
+SECRET_KEY = "genai-secret-change-me-in-production-2026"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 72
 

@@ -1,1 +1,1 @@
-# WanForge application package
+# GenAI application package

@@ -1,8 +1,8 @@
 /**
- * WanForge client – auth, theme, nav, helpers
+ * GenAI client – auth, theme, nav, helpers
  */
-const TOKEN_KEY = 'wanforge_token';
-const USER_KEY = 'wanforge_user';
+const TOKEN_KEY = 'genai_token';
+const USER_KEY = 'genai_user';
 
 const API = {
   async request(path, opts = {}) {

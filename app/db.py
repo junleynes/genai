@@ -36,9 +36,9 @@ def _save(path: Path, data: Any) -> None:
 # ─── Settings / Branding ───────────────────────────────────────────────────────
 
 DEFAULT_SETTINGS = {
-    "app_name": "WanForge",
+    "app_name": "GenAI",
     "tagline": "Simplify AI Video & Image Generation",
-    "footer": "© 2026 WanForge. Powered by Wan2GP.",
+    "footer": "© 2026 GenAI. Powered by Wan2GP.",
     "logo_url": "",
     "favicon_url": "",
     "primary_color": "#6366f1",

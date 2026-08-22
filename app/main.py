@@ -1,5 +1,5 @@
 """
-WanForge – Modern frontend for Wan2GP
+GenAI – Modern frontend for Wan2GP
 User/Job management • Branding • Easy & Advanced generation modes
 """
 import asyncio
@@ -26,10 +26,10 @@ from . import auth, db
 from .generation import process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("wanforge")
+logger = logging.getLogger("genai")
 
 BASE = Path(__file__).parent.parent
-app = FastAPI(title="WanForge", version="1.0.0")
+app = FastAPI(title="GenAI", version="1.0.0")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
@@ -39,7 +39,7 @@ templates = Jinja2Templates(directory=str(BASE / "templates"))
 def api_version():
     """Use this to verify the deployed code is MCP (not Gradio mock)."""
     return {
-        "app": "WanForge",
+        "app": "GenAI",
         "backend": BACKEND_ID,
         "built": BACKEND_BUILT,
         "mock": False,
@@ -49,7 +49,7 @@ def api_version():
 @app.on_event("startup")
 def startup():
     db.ensure_admin()
-    logger.info("WanForge ready")
+    logger.info("GenAI ready")
 
 
 # ─── Pydantic models ──────────────────────────────────────────────────────────
@@ -284,7 +284,7 @@ async def api_models(job_type: str = "t2v", user: dict = Depends(auth.get_curren
             "mcp": mcp_url,
         }
     except Exception as e:
-        logger = __import__("logging").getLogger("wanforge")
+        logger = __import__("logging").getLogger("genai")
         logger.exception("api/models failed")
         return {
             "ok": False,

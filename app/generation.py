@@ -1,5 +1,5 @@
 """
-WanForge job runner — remote WanGP via MCP Streamable HTTP.
+GenAI job runner — remote WanGP via MCP Streamable HTTP.
 
 Verified against WanGP v1.10.1 / protocol 2025-03-26:
   - Endpoint MUST be http://HOST:PORT/mcp/  (trailing slash; /mcp → 307)
@@ -22,7 +22,7 @@ import httpx
 
 from . import db
 
-logger = logging.getLogger("wanforge.generation")
+logger = logging.getLogger("genai.generation")
 
 # Deployed-code fingerprint — GET /api/version must show this
 BACKEND_ID = "mcp-streamable-http-v2-no-mock"
@@ -280,7 +280,7 @@ def mcp_ensure_session(mcp_url: str, timeout: float = 30.0) -> str | None:
         {
             "protocolVersion": "2025-03-26",
             "capabilities": {},
-            "clientInfo": {"name": "WanForge", "version": "1.1.0"},
+            "clientInfo": {"name": "GenAI", "version": "1.1.0"},
         },
         timeout=timeout,
         session_id=None,
@@ -441,7 +441,7 @@ def _save_bytes_result(job_id: str, data: bytes, ext: str = ".png") -> str:
 
 
 def _rewrite_transfer_url(url: str, mcp_url: str) -> str:
-    """Relative or localhost download URLs must use the MCP host WanForge can reach."""
+    """Relative or localhost download URLs must use the MCP host GenAI can reach."""
     url = str(url).strip()
     origin = _mcp_origin(mcp_url)
     if not url:
@@ -911,7 +911,7 @@ def mcp_download_remote_file(mcp_url: str, remote_path: str, job_id: str, gradio
                 last_err = str(e)
 
     raise RuntimeError(
-        f"Cannot fetch remote file {remote_path!r} onto WanForge host "
+        f"Cannot fetch remote file {remote_path!r} onto GenAI host "
         f"(not local, gallery download needed). last={last_err}"
     )
 
@@ -1125,7 +1125,7 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         db.update_job(job_id, {
             "error": (
                 f"Cannot reach MCP at {_mcp_endpoint(mcp_url)}: {e}. "
-                "Use trailing /mcp/ and ensure the WanForge host can reach that IP:port."
+                "Use trailing /mcp/ and ensure the GenAI host can reach that IP:port."
             )[:800]
         })
         return False
