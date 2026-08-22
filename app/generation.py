@@ -26,7 +26,7 @@ logger = logging.getLogger("genai.generation")
 
 # Deployed-code fingerprint — GET /api/version must show this
 BACKEND_ID = "mcp-streamable-http-v2-no-mock"
-BACKEND_BUILT = "2026-08-23-no-mcp-file-probe"
+BACKEND_BUILT = "2026-08-23-gallery-retry"
 
 UPLOAD_DIR = Path(__file__).parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -565,90 +565,122 @@ def _artifact_to_local_file(job_id: str, art: dict) -> str | None:
     return None
 
 
+def _normalize_gallery_items(raw) -> list[dict]:
+    """Accept many MCP gallery payload shapes."""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if not isinstance(raw, dict):
+        return []
+    out = []
+    for key in (
+        "items", "gallery", "gallery_items", "images", "videos", "audio",
+        "visual", "visuals", "records", "entries", "data", "result",
+        "selected", "selection",
+    ):
+        val = raw.get(key)
+        if isinstance(val, list):
+            out.extend([x for x in val if isinstance(x, dict)])
+        elif isinstance(val, dict):
+            # nested container or single item
+            if any(k in val for k in ("gallery_id", "id", "path", "filename")):
+                out.append(val)
+            else:
+                out.extend(_normalize_gallery_items(val))
+    # single item dict
+    if not out and any(k in raw for k in ("gallery_id", "path", "filename")):
+        out.append(raw)
+    return out
+
+
 def mcp_fetch_result_via_gallery(mcp_url: str, job_id: str, remote_path: str | None = None) -> str:
     """
     MCP-only transfer (no Gradio):
-      1) wangp_list_gallery → find item matching output filename
-      2) wangp_create_gallery_download(gallery_id) → GET bytes
-      3) wangp_get_gallery_selection as fallback
+      list gallery (with retries) → create_gallery_download → GET bytes
     """
     name = Path(str(remote_path).replace("\\", "/")).name if remote_path else None
     stem = Path(name).stem if name else None
 
-    items = []
-    for tool, args in (
+    attempts = (
         ("wangp_list_gallery", {}),
         ("wangp_list_gallery", {"media_type": "image"}),
+        ("wangp_list_gallery", {"media_type": "video"}),
         ("wangp_list_gallery", {"media_type": "all"}),
         ("wangp_get_gallery_selection", {"media_type": "all"}),
+        ("wangp_get_gallery_selection", {"media_type": "image"}),
         ("wangp_get_gallery_selection", {}),
-    ):
-        try:
-            raw = mcp_call_tool(mcp_url, tool, args, timeout=45.0)
-        except Exception as e:
-            logger.debug("%s failed: %s", tool, e)
-            continue
-        batch = raw if isinstance(raw, list) else (
-            (raw or {}).get("items")
-            or (raw or {}).get("gallery")
-            or (raw or {}).get("gallery_items")
-            or (raw or {}).get("images")
-            or (raw or {}).get("videos")
-            or ([raw] if isinstance(raw, dict) and (raw.get("gallery_id") or raw.get("id") or raw.get("path")) else [])
-        )
-        if isinstance(batch, dict):
-            batch = list(batch.values())
-        if isinstance(batch, list):
-            items.extend([x for x in batch if isinstance(x, dict)])
+    )
+
+    items: list[dict] = []
+    last_raw = None
+    # Gallery may lag a moment after job completion
+    for attempt in range(5):
+        if attempt:
+            time.sleep(1.5 * attempt)
+        for tool, args in attempts:
+            try:
+                raw = mcp_call_tool(mcp_url, tool, args, timeout=45.0)
+                last_raw = raw
+            except Exception as e:
+                logger.debug("%s failed: %s", tool, e)
+                continue
+            batch = _normalize_gallery_items(raw)
+            for it in batch:
+                if it not in items:
+                    items.append(it)
         if items:
             break
 
     if not items:
         raise RuntimeError(
-            "wangp_list_gallery returned no items. "
-            "Outputs must appear in the MCP Gallery for download without Gradio."
+            "wangp_list_gallery returned no items after retries. "
+            "WanGP MCP gallery is empty for this session — "
+            "outputs may not be registered for HTTP download. "
+            f"last_raw={str(last_raw)[:200]}"
         )
 
     def score(it: dict) -> int:
         s = 0
-        p = str(it.get("path") or it.get("file") or it.get("filename") or "")
+        p = str(it.get("path") or it.get("file") or it.get("filename") or it.get("name") or "")
         n = Path(p.replace("\\", "/")).name
-        gid = it.get("gallery_id") or it.get("id")
-        if name and n == name:
-            s += 100
-        if stem and stem in n:
-            s += 50
-        if name and name in p:
-            s += 40
-        if remote_path and remote_path.replace("\\", "/") in p.replace("\\", "/"):
+        gid = it.get("gallery_id") or it.get("id") or it.get("item_id")
+        if name and n.lower() == name.lower():
+            s += 200
+        if name and name.lower() in p.lower():
             s += 80
+        if stem and stem.lower() in n.lower():
+            s += 60
+        if remote_path and remote_path.replace("\\", "/").lower() in p.replace("\\", "/").lower():
+            s += 100
         if gid:
-            s += 1
-        # prefer newest if timestamp-like fields exist
-        for k in ("created_at", "mtime", "time", "index"):
-            if it.get(k) is not None:
-                try:
-                    s += int(float(it[k])) % 1000
-                except Exception:
-                    pass
+            s += 5
+        # prefer image extensions when path was jpg
+        if name and name.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+            if n.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                s += 10
         return s
 
     items_sorted = sorted(items, key=score, reverse=True)
     errors = []
-    for it in items_sorted[:8]:
-        gid = it.get("gallery_id") or it.get("id") or it.get("item_id")
+    for it in items_sorted[:12]:
+        gid = it.get("gallery_id") or it.get("id") or it.get("item_id") or it.get("client_id")
         if not gid:
             continue
-        # skip if looks like path
-        if "/" in str(gid) or "\\" in str(gid):
+        gs = str(gid).strip()
+        if not gs or "/" in gs or "\\" in gs or gs.lower().endswith((".png", ".jpg", ".jpeg", ".mp4", ".webp")):
             continue
         try:
-            return mcp_download_gallery_item(mcp_url, str(gid), job_id)
+            return mcp_download_gallery_item(mcp_url, gs, job_id)
         except Exception as e:
-            errors.append(f"{gid}: {e}")
+            errors.append(f"{gs}: {e}")
+            logger.warning("gallery download failed id=%s: %s", gs, e)
+
     raise RuntimeError(
-        "Gallery items found but download failed: " + ("; ".join(errors)[:400] if errors else "no gallery_id")
+        "Gallery items found but download failed: "
+        + ("; ".join(errors)[:400] if errors else "no usable gallery_id in items")
     )
+
 
 
 def mcp_download_remote_file(mcp_url: str, remote_path: str, job_id: str, gradio_url: str = "") -> str:
@@ -823,6 +855,26 @@ def _walk_file_paths(obj: Any, found: list | None = None) -> list[str]:
             _walk_file_paths(x, found)
     return found
 
+
+
+def _merge_gallery_from_job_state(result: dict, st: dict) -> dict:
+    """Pull gallery_items / generated_files from outer job poll into result."""
+    if not isinstance(result, dict):
+        result = {}
+    if not isinstance(st, dict):
+        return result
+    for key in ("gallery_items", "generated_files", "files", "artifacts"):
+        if key not in result or not result.get(key):
+            if st.get(key):
+                result[key] = st[key]
+        # also nested under result
+    nested = st.get("result") if isinstance(st.get("result"), dict) else None
+    if nested:
+        for key in ("gallery_items", "generated_files", "files", "artifacts"):
+            if key not in result or not result.get(key):
+                if nested.get(key):
+                    result[key] = nested[key]
+    return result
 
 def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: str = "") -> bool:
     """Copy/download result onto *this* server so the browser can preview it."""
@@ -1133,7 +1185,10 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         if done or status in ("completed", "success", "failed", "error", "cancelled", "canceled"):
             if result is None:
                 result = st
-            return _apply_mcp_result(job_id, result if isinstance(result, dict) else st, mcp_url, gradio_url=(settings_cfg.get('wan2gp_url') or '').strip())
+            payload = result if isinstance(result, dict) else st
+            if isinstance(payload, dict):
+                payload = _merge_gallery_from_job_state(dict(payload), st if isinstance(st, dict) else {})
+            return _apply_mcp_result(job_id, payload if isinstance(payload, dict) else st, mcp_url, gradio_url=(settings_cfg.get('wan2gp_url') or '').strip())
 
         time.sleep(2.0)
 
