@@ -26,7 +26,7 @@ logger = logging.getLogger("wanforge.generation")
 
 # Deployed-code fingerprint — GET /api/version must show this
 BACKEND_ID = "mcp-streamable-http-v2-no-mock"
-BACKEND_BUILT = "2026-08-23-file-transfer"
+BACKEND_BUILT = "2026-08-23-mcp-gallery-transfer"
 
 UPLOAD_DIR = Path(__file__).parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -491,6 +491,124 @@ def mcp_download_gallery_item(mcp_url: str, gallery_id: str, job_id: str) -> str
         return _save_bytes_result(job_id, r.content, ext)
 
 
+
+def _artifact_to_local_file(job_id: str, art: dict) -> str | None:
+    """Decode MCP result.artifacts / embedded media into static/results."""
+    if not isinstance(art, dict):
+        return None
+    # base64 fields common over JSON-RPC
+    for key in ("image_base64", "data", "b64", "base64", "png_base64", "jpeg_base64"):
+        val = art.get(key)
+        if isinstance(val, str) and len(val) > 100:
+            import base64
+            raw = val
+            if "," in raw and raw.strip().startswith("data:"):
+                raw = raw.split(",", 1)[1]
+            try:
+                data = base64.b64decode(raw)
+                if len(data) > 64:
+                    media = str(art.get("media_type") or art.get("type") or "image")
+                    ext = ".mp4" if "video" in media else ".png"
+                    if data[:3] == b"\xff\xd8\xff":
+                        ext = ".jpg"
+                    return _save_bytes_result(job_id, data, ext)
+            except Exception:
+                pass
+    # raw bytes as list of ints (unlikely but possible)
+    for key in ("image_bytes", "bytes", "content"):
+        val = art.get(key)
+        if isinstance(val, list) and len(val) > 64 and all(isinstance(x, int) for x in val[:20]):
+            data = bytes(val)
+            return _save_bytes_result(job_id, data, ".png")
+    return None
+
+
+def mcp_fetch_result_via_gallery(mcp_url: str, job_id: str, remote_path: str | None = None) -> str:
+    """
+    MCP-only transfer (no Gradio):
+      1) wangp_list_gallery → find item matching output filename
+      2) wangp_create_gallery_download(gallery_id) → GET bytes
+      3) wangp_get_gallery_selection as fallback
+    """
+    name = Path(str(remote_path).replace("\\", "/")).name if remote_path else None
+    stem = Path(name).stem if name else None
+
+    items = []
+    for tool, args in (
+        ("wangp_list_gallery", {}),
+        ("wangp_list_gallery", {"media_type": "image"}),
+        ("wangp_list_gallery", {"media_type": "all"}),
+        ("wangp_get_gallery_selection", {"media_type": "all"}),
+        ("wangp_get_gallery_selection", {}),
+    ):
+        try:
+            raw = mcp_call_tool(mcp_url, tool, args, timeout=45.0)
+        except Exception as e:
+            logger.debug("%s failed: %s", tool, e)
+            continue
+        batch = raw if isinstance(raw, list) else (
+            (raw or {}).get("items")
+            or (raw or {}).get("gallery")
+            or (raw or {}).get("gallery_items")
+            or (raw or {}).get("images")
+            or (raw or {}).get("videos")
+            or ([raw] if isinstance(raw, dict) and (raw.get("gallery_id") or raw.get("id") or raw.get("path")) else [])
+        )
+        if isinstance(batch, dict):
+            batch = list(batch.values())
+        if isinstance(batch, list):
+            items.extend([x for x in batch if isinstance(x, dict)])
+        if items:
+            break
+
+    if not items:
+        raise RuntimeError(
+            "wangp_list_gallery returned no items. "
+            "Outputs must appear in the MCP Gallery for download without Gradio."
+        )
+
+    def score(it: dict) -> int:
+        s = 0
+        p = str(it.get("path") or it.get("file") or it.get("filename") or "")
+        n = Path(p.replace("\\", "/")).name
+        gid = it.get("gallery_id") or it.get("id")
+        if name and n == name:
+            s += 100
+        if stem and stem in n:
+            s += 50
+        if name and name in p:
+            s += 40
+        if remote_path and remote_path.replace("\\", "/") in p.replace("\\", "/"):
+            s += 80
+        if gid:
+            s += 1
+        # prefer newest if timestamp-like fields exist
+        for k in ("created_at", "mtime", "time", "index"):
+            if it.get(k) is not None:
+                try:
+                    s += int(float(it[k])) % 1000
+                except Exception:
+                    pass
+        return s
+
+    items_sorted = sorted(items, key=score, reverse=True)
+    errors = []
+    for it in items_sorted[:8]:
+        gid = it.get("gallery_id") or it.get("id") or it.get("item_id")
+        if not gid:
+            continue
+        # skip if looks like path
+        if "/" in str(gid) or "\\" in str(gid):
+            continue
+        try:
+            return mcp_download_gallery_item(mcp_url, str(gid), job_id)
+        except Exception as e:
+            errors.append(f"{gid}: {e}")
+    raise RuntimeError(
+        "Gallery items found but download failed: " + ("; ".join(errors)[:400] if errors else "no gallery_id")
+    )
+
+
 def mcp_download_remote_file(mcp_url: str, remote_path: str, job_id: str, gradio_url: str = "") -> str:
     """
     Remote WanGP paths are not on this disk. Try:
@@ -734,11 +852,36 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
             except Exception as e:
                 transfer_errors.append(str(e))
 
+    # 5) Artifacts (return_media / embedded base64)
+    if not url:
+        arts = result.get("artifacts") or result.get("media") or []
+        if isinstance(arts, dict):
+            arts = [arts]
+        if isinstance(arts, list):
+            for art in arts:
+                try:
+                    got = _artifact_to_local_file(job_id, art) if isinstance(art, dict) else None
+                    if got:
+                        url = got
+                        break
+                except Exception as e:
+                    transfer_errors.append(f"artifact: {e}")
+
+    # 6) MCP-only: list gallery & download (no Gradio required)
+    if not url and mcp_url:
+        paths = _walk_file_paths(result)
+        hint = paths[0] if paths else None
+        try:
+            url = mcp_fetch_result_via_gallery(mcp_url, job_id, hint)
+        except Exception as e:
+            transfer_errors.append(f"list_gallery: {e}")
+            logger.warning("gallery list transfer failed: %s", e)
+
     if not url:
         msg = (
-            "Generation finished on remote WanGP, but the file could not be transferred to this app. "
-            "Set Gradio URL in Admin (e.g. http://WANGP_HOST:7860) so files can be fetched via /file=, "
-            "or ensure MCP gallery download works. "
+            "Generation finished on remote WanGP, but the file could not be transferred over MCP. "
+            "No Gradio is required — the file must be available via Gallery download "
+            "(wangp_list_gallery + wangp_create_gallery_download). "
             + ("; ".join(transfer_errors)[:450] if transfer_errors else "")
         )
         db.update_job(job_id, {"error": msg[:800], "status": "failed", "progress": 0})
