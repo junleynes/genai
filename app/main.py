@@ -259,17 +259,40 @@ async def api_models(job_type: str = "t2v", user: dict = Depends(auth.get_curren
     """List WanGP models filtered for the selected generation mode."""
     settings = db.get_settings()
     mcp_url = (settings.get("wan2gp_mcp_url") or "").strip()
-    if not mcp_url or not settings.get("wan2gp_enabled"):
+    enabled = bool(settings.get("wan2gp_enabled"))
+    if not mcp_url:
         return {
             "ok": False,
             "models": [],
-            "message": "Configure MCP URL and enable Wan2GP in Admin to load models.",
+            "message": "MCP URL is empty. Set it in Admin → Wan2GP Server (…/mcp/).",
+            "job_type": job_type,
+        }
+    if not enabled:
+        return {
+            "ok": False,
+            "models": [],
+            "message": "Wan2GP is disabled. Enable it in Admin → Wan2GP Server.",
+            "job_type": job_type,
         }
     try:
         models = await asyncio.to_thread(list_models_for_job_type, mcp_url, job_type)
-        return {"ok": True, "models": models, "job_type": job_type}
+        return {
+            "ok": True,
+            "models": models,
+            "job_type": job_type,
+            "count": len(models),
+            "mcp": mcp_url,
+        }
     except Exception as e:
-        return {"ok": False, "models": [], "message": str(e)[:400], "job_type": job_type}
+        logger = __import__("logging").getLogger("wanforge")
+        logger.exception("api/models failed")
+        return {
+            "ok": False,
+            "models": [],
+            "message": str(e)[:500],
+            "job_type": job_type,
+            "mcp": mcp_url,
+        }
 
 
 @app.post("/api/jobs/{job_id}/retry")

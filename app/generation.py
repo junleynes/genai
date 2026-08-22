@@ -763,23 +763,61 @@ _JOB_TYPE_FILTERS = {
 }
 
 
-def list_models_for_job_type(mcp_url: str, job_type: str, limit: int = 80) -> list[dict]:
-    """Call wangp_list_models with filters; return compact UI-friendly list."""
-    filters = dict(_JOB_TYPE_FILTERS.get(job_type) or {"main_output": "video"})
-    filters["limit"] = limit
-    raw = mcp_call_tool(mcp_url, "wangp_list_models", filters, timeout=45.0)
-
-    items = raw if isinstance(raw, list) else (raw.get("models") or raw.get("items") or [])
-    if not isinstance(items, list):
-        items = []
+def _normalize_model_list(raw: Any) -> list[dict]:
+    """Accept many MCP payload shapes and return a list of model dicts."""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, dict):
+        items = (
+            raw.get("models")
+            or raw.get("items")
+            or raw.get("data")
+            or raw.get("result")
+            or raw.get("model_defs")
+            or raw.get("metadata")
+        )
+        if items is None and raw.get("model_type"):
+            items = [raw]
+        if isinstance(items, dict):
+            # sometimes keyed by model_type
+            items = list(items.values())
+        if not isinstance(items, list):
+            # text blob?
+            text = raw.get("text")
+            if isinstance(text, str) and text.strip().startswith(("[", "{")):
+                import json as _json
+                try:
+                    parsed = _json.loads(text)
+                    return _normalize_model_list(parsed)
+                except Exception:
+                    return []
+            return []
+    elif isinstance(raw, str):
+        import json as _json
+        try:
+            return _normalize_model_list(_json.loads(raw))
+        except Exception:
+            return []
+    else:
+        return []
 
     out = []
     for m in items:
         if not isinstance(m, dict):
             continue
         meta = m.get("metadata") if isinstance(m.get("metadata"), dict) else {}
-        model_type = m.get("model_type") or meta.get("model_type") or m.get("id") or ""
-        name = m.get("name") or meta.get("name") or model_type
+        model_type = (
+            m.get("model_type")
+            or meta.get("model_type")
+            or m.get("id")
+            or m.get("type")
+            or ""
+        )
+        if not model_type:
+            continue
+        name = m.get("name") or meta.get("name") or meta.get("family_label") or model_type
         main_out = meta.get("main_output") or m.get("main_output") or []
         inputs = meta.get("inputs") or m.get("inputs") or []
         if isinstance(main_out, str):
@@ -788,33 +826,98 @@ def list_models_for_job_type(mcp_url: str, job_type: str, limit: int = 80) -> li
             inputs = [inputs]
         family = meta.get("family") or m.get("family") or ""
         out.append({
-            "model_type": model_type,
-            "name": name,
-            "family": family,
-            "main_output": main_out,
-            "inputs": inputs,
+            "model_type": str(model_type),
+            "name": str(name),
+            "family": str(family),
+            "main_output": list(main_out) if main_out else [],
+            "inputs": list(inputs) if inputs else [],
         })
+    return out
 
-    # Client-side safety filter if MCP ignored filters
-    def ok(m: dict) -> bool:
+
+def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]:
+    """Soft filter — never return empty if we had candidates."""
+    if not models:
+        return []
+
+    def score(m: dict) -> int:
         mo = [str(x).lower() for x in (m.get("main_output") or [])]
         inp = [str(x).lower() for x in (m.get("inputs") or [])]
+        blob = f"{m.get('model_type','')} {m.get('name','')} {m.get('family','')}".lower()
+        s = 0
         if job_type in ("t2i", "i2i"):
-            if mo and "image" not in mo and "video" in mo:
-                return False
-            if job_type == "i2i" and inp and "image" not in inp:
-                return False
-        if job_type in ("t2v", "i2v", "ia2v", "v2v"):
-            if mo and "video" not in mo and "image" in mo and "video" not in mo:
-                return False
-            if job_type == "i2v" and inp and "image" not in inp:
-                return False
-            if job_type == "v2v" and inp and "video" not in inp:
-                return False
-        return bool(m.get("model_type"))
+            if "image" in mo:
+                s += 3
+            if "video" in mo and "image" not in mo:
+                s -= 2
+            if "t2i" in blob or "text2image" in blob or "text-to-image" in blob or "flux" in blob or "qwen" in blob:
+                s += 1
+            if job_type == "i2i":
+                if "image" in inp:
+                    s += 2
+                if "i2i" in blob or "img2img" in blob or "edit" in blob:
+                    s += 1
+        elif job_type in ("t2v", "i2v", "ia2v", "v2v"):
+            if "video" in mo:
+                s += 3
+            if "image" in mo and "video" not in mo:
+                s -= 2
+            if job_type == "i2v" and ("image" in inp or "i2v" in blob):
+                s += 2
+            if job_type == "v2v" and ("video" in inp or "v2v" in blob):
+                s += 2
+            if job_type == "t2v" and ("t2v" in blob or "text" in inp):
+                s += 1
+            if job_type == "ia2v" and ("audio" in inp or "s2v" in blob or "talk" in blob):
+                s += 2
+        return s
 
-    filtered = [m for m in out if ok(m)]
-    return filtered or out  # if over-filtered empty, return unfiltered MCP result
+    ranked = sorted(models, key=score, reverse=True)
+    positive = [m for m in ranked if score(m) > 0]
+    return positive if positive else ranked
+
+
+def list_models_for_job_type(mcp_url: str, job_type: str, limit: int = 120) -> list[dict]:
+    """
+    Load models from MCP. Tries filtered wangp_list_models, then unfiltered,
+    then wangp_list_model_defs.
+    """
+    attempts: list[tuple[str, dict]] = []
+    base_filter = dict(_JOB_TYPE_FILTERS.get(job_type) or {})
+    if base_filter:
+        attempts.append(("wangp_list_models", {**base_filter, "limit": limit}))
+    attempts.append(("wangp_list_models", {"limit": limit}))
+    # broader discovery
+    attempts.append(("wangp_list_model_defs", {**base_filter, "limit": limit} if base_filter else {"limit": limit}))
+    attempts.append(("wangp_list_model_defs", {"limit": limit}))
+
+    errors = []
+    collected: list[dict] = []
+    seen = set()
+
+    for tool, args in attempts:
+        try:
+            raw = mcp_call_tool(mcp_url, tool, args, timeout=60.0)
+            batch = _normalize_model_list(raw)
+            for m in batch:
+                mt = m["model_type"]
+                if mt not in seen:
+                    seen.add(mt)
+                    collected.append(m)
+            if collected:
+                break
+        except Exception as e:
+            errors.append(f"{tool}: {e}")
+            logger.warning("list models %s failed: %s", tool, e)
+
+    if not collected:
+        raise RuntimeError(
+            "No models returned from MCP. "
+            + ("; ".join(errors) if errors else "Empty list.")
+        )
+
+    filtered = _filter_models_for_job_type(collected, job_type)
+    return filtered[:limit]
 
 
 async def process_job(job_id: str) -> None:
