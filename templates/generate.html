@@ -29,6 +29,10 @@
     <input type="hidden" name="mode" id="mode" value="easy" />
 
     <div>
+      <label class="block text-sm font-medium mb-1.5">Model family</label>
+      <select id="model-family" class="w-full mb-3 px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm">
+        <option value="">All families</option>
+      </select>
       <label class="block text-sm font-medium mb-1.5">Model</label>
       <select name="model" id="model-select" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm">
         <option value="auto">Auto (server default)</option>
@@ -127,18 +131,6 @@
           <label class="block text-sm font-medium mb-1.5">FPS</label>
           <input type="number" name="fps" value="16" min="8" max="30" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
         </div>
-        <div class="sm:col-span-2">
-          <label class="block text-sm font-medium mb-1.5">Model</label>
-          <select name="model" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
-            <option value="auto">Auto (best available)</option>
-            <option value="wan2.1-1.3b">Wan 2.1 1.3B (fast, 6GB+)</option>
-            <option value="wan2.1-14b">Wan 2.1 14B (quality)</option>
-            <option value="wan2.2">Wan 2.2</option>
-            <option value="ltx">LTX Video</option>
-            <option value="hunyuan">Hunyuan Video</option>
-            <option value="minimax-h3">MiniMax H3</option>
-          </select>
-        </div>
       </div>
     </div>
 
@@ -170,46 +162,104 @@ function needsVideo() { return currentType === 'v2v'; }
 function promptRequired() { return ['t2v','t2i'].includes(currentType); }
 
 
+let allModelsCache = [];
+
+function fillModelSelect(models) {
+  const sel = document.getElementById('model-select');
+  const hint = document.getElementById('model-hint');
+  const familySel = document.getElementById('model-family');
+  if (!sel) return;
+  const prev = sel.value;
+  const family = (familySel && familySel.value) || '';
+  let list = models || [];
+  if (family) {
+    const f = family.toLowerCase();
+    list = list.filter(m => {
+      const fam = String(m.family || '').toLowerCase();
+      const mt = String(m.model_type || '').toLowerCase();
+      const nm = String(m.name || '').toLowerCase();
+      return fam === f || fam.includes(f) || mt.includes(f) || nm.includes(f);
+    });
+  }
+  sel.innerHTML = '';
+  const optAuto = document.createElement('option');
+  optAuto.value = 'auto';
+  optAuto.textContent = 'Auto (server default)';
+  sel.appendChild(optAuto);
+  for (const m of list) {
+    const o = document.createElement('option');
+    o.value = m.model_type;
+    const bits = [m.name || m.model_type];
+    if (m.family) bits.push('[' + m.family + ']');
+    o.textContent = bits.join(' ');
+    o.title = m.model_type + ' · out=' + (m.main_output || []).join(',') + ' · in=' + (m.inputs || []).join(',');
+    sel.appendChild(o);
+  }
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+  if (hint) {
+    const total = (models || []).length;
+    const shown = list.length;
+    hint.textContent = family
+      ? (shown + ' of ' + total + ' model(s) in family “' + family + '” for ' + currentType)
+      : (total + ' model(s) for ' + currentType);
+    hint.className = 'text-xs text-slate-400 flex-1';
+  }
+}
+
+function rebuildFamilyOptions(models) {
+  const familySel = document.getElementById('model-family');
+  if (!familySel) return;
+  const prev = familySel.value;
+  const families = new Set();
+  for (const m of models || []) {
+    if (m.family) families.add(String(m.family));
+  }
+  familySel.innerHTML = '<option value="">All families</option>';
+  [...families].sort((a, b) => a.localeCompare(b)).forEach(f => {
+    const o = document.createElement('option');
+    o.value = f;
+    o.textContent = f;
+    familySel.appendChild(o);
+  });
+  if (prev && [...familySel.options].some(o => o.value === prev)) familySel.value = prev;
+}
+
 async function loadModels() {
   const sel = document.getElementById('model-select');
   const hint = document.getElementById('model-hint');
   if (!sel) return;
-  const prev = sel.value;
   sel.innerHTML = '<option value="auto">Loading models…</option>';
   try {
     const data = await API.get('/api/models?job_type=' + encodeURIComponent(currentType));
-    sel.innerHTML = '';
-    const optAuto = document.createElement('option');
-    optAuto.value = 'auto';
-    optAuto.textContent = 'Auto (server default)';
-    sel.appendChild(optAuto);
     if (!data.ok) {
-      hint.textContent = data.message || 'Could not load models';
-      hint.className = 'text-xs text-amber-600 mt-1';
+      allModelsCache = [];
+      sel.innerHTML = '<option value="auto">Auto (server default)</option>';
+      if (hint) {
+        hint.textContent = data.message || 'Could not load models';
+        hint.className = 'text-xs text-amber-600 flex-1';
+      }
+      rebuildFamilyOptions([]);
       return;
     }
-    const models = data.models || [];
-    if (!models.length) {
-      hint.textContent = 'No models matched this mode on the MCP server.';
-      hint.className = 'text-xs text-amber-600 mt-1';
+    allModelsCache = data.models || [];
+    if (!allModelsCache.length) {
+      sel.innerHTML = '<option value="auto">Auto (server default)</option>';
+      if (hint) {
+        hint.textContent = 'No models matched this mode on the MCP server.';
+        hint.className = 'text-xs text-amber-600 flex-1';
+      }
+      rebuildFamilyOptions([]);
       return;
     }
-    for (const m of models) {
-      const o = document.createElement('option');
-      o.value = m.model_type;
-      const bits = [m.name || m.model_type];
-      if (m.family) bits.push('[' + m.family + ']');
-      o.textContent = bits.join(' ');
-      o.title = m.model_type + ' · out=' + (m.main_output || []).join(',') + ' · in=' + (m.inputs || []).join(',');
-      sel.appendChild(o);
-    }
-    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
-    hint.textContent = models.length + ' model(s) for ' + currentType + ' (filtered by main_output / inputs).';
-    hint.className = 'text-xs text-slate-400 mt-1';
+    rebuildFamilyOptions(allModelsCache);
+    fillModelSelect(allModelsCache);
   } catch (err) {
+    allModelsCache = [];
     sel.innerHTML = '<option value="auto">Auto (server default)</option>';
-    hint.textContent = 'Model list error: ' + err.message;
-    hint.className = 'text-xs text-red-500 mt-1';
+    if (hint) {
+      hint.textContent = 'Model list error: ' + err.message;
+      hint.className = 'text-xs text-red-500 flex-1';
+    }
   }
 }
 
