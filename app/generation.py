@@ -1,25 +1,24 @@
 """
-Job processing via the official WanGP Python API (shared.api).
+WanForge job runner — remote WanGP via MCP Streamable HTTP.
 
-Docs: https://github.com/deepbeepmeep/Wan2GP/blob/main/docs/API.md
-Settings: https://github.com/deepbeepmeep/Wan2GP/blob/main/docs/SETTINGS.md
-
-Preferred path (same machine as WanGP install):
-  from shared.api import init
-  session = init(root=Path(...))
-  job = session.submit_task({...settings...})
-  result = job.result()  # result.generated_files
-
-Gradio HTTP /predict is NOT the documented integration path for WanGP.
+Verified against WanGP v1.10.1 / protocol 2025-03-26:
+  - Endpoint MUST be http://HOST:PORT/mcp/  (trailing slash; /mcp → 307)
+  - Handshake: initialize → notifications/initialized → tools/call
+  - Header: Mcp-Session-Id
+  - Tools: wangp_generate, wangp_get_job, wangp_list_models, ...
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
+
+import httpx
 
 from . import db
 
@@ -30,12 +29,12 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR = Path(__file__).parent.parent / "static" / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-_session = None
-_session_root: Optional[str] = None
+_mcp_req_id = 0
+_mcp_sessions: dict[str, str] = {}  # endpoint -> session id
 
 
 def _duration_to_frames(seconds: float, fps: int = 24) -> int:
-    n = max(1, int(round(seconds * fps)))
+    n = max(1, int(round(float(seconds) * fps)))
     return max(5, (n // 4) * 4 + 1)
 
 
@@ -44,12 +43,9 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     jtype = job.get("job_type", "t2v")
     prompt = job.get("prompt") or ""
 
-    model_type = (
-        params.get("model_type")
-        or (params.get("model") if params.get("model") not in (None, "", "auto") else None)
-        or defaults.get("model_type")
-        or "ltx2_22B_distilled"
-    )
+    model = params.get("model_type") or params.get("model")
+    if model in (None, "", "auto"):
+        model = defaults.get("model_type") or "ltx2_22B_distilled"
 
     resolution = params.get("resolution") or defaults.get("resolution") or "1280x704"
     steps = int(params.get("steps") or params.get("num_inference_steps") or defaults.get("num_inference_steps") or 8)
@@ -60,7 +56,7 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
         video_length = _duration_to_frames(duration)
 
     settings: dict[str, Any] = {
-        "model_type": model_type,
+        "model_type": str(model),
         "prompt": prompt,
         "negative_prompt": params.get("negative_prompt") or "",
         "resolution": resolution,
@@ -68,7 +64,7 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
         "seed": seed,
         "video_length": int(video_length),
         "duration_seconds": duration,
-        "force_fps": str(params.get("force_fps") or defaults.get("force_fps") or "24"),
+        "force_fps": str(params.get("force_fps") or params.get("fps") or defaults.get("force_fps") or "24"),
         "guidance_scale": float(params.get("guidance_scale") or params.get("cfg") or 5.0),
         "flow_shift": float(params.get("flow_shift") or 5.0),
         "_api": {"return_media": True},
@@ -96,15 +92,12 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
         settings["image_prompt_type"] = "S"
     if image_end:
         settings["image_end"] = str(image_end)
-
     if jtype == "v2v" and video_path:
         settings["video_source"] = str(video_path)
         settings["image_prompt_type"] = "V"
-
     if jtype == "ia2v" and audio_path:
         settings["audio_guide"] = str(audio_path)
-        settings["audio_prompt_type"] = settings.get("audio_prompt_type") or "A"
-
+        settings["audio_prompt_type"] = "A"
     if jtype in ("t2i", "i2i"):
         settings["image_mode"] = 1
         settings["video_length"] = 1
@@ -120,32 +113,6 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     return settings
 
 
-def _get_session(root: str, cli_args: Optional[list] = None):
-    global _session, _session_root
-    root = str(Path(root).resolve())
-    if _session is not None and _session_root == root:
-        return _session
-
-    root_path = Path(root)
-    if not root_path.is_dir():
-        raise FileNotFoundError(f"WanGP root not found: {root}")
-
-    if str(root_path) not in sys.path:
-        sys.path.insert(0, str(root_path))
-
-    from shared.api import init  # type: ignore
-
-    args = cli_args or ["--attention", "sdpa", "--profile", "4"]
-    _session = init(
-        root=root_path,
-        cli_args=args,
-        console_output=False,
-    )
-    _session_root = root
-    logger.info("WanGP session initialized at %s", root)
-    return _session
-
-
 def _copy_result_into_static(src: str | Path, job_id: str) -> str:
     src = Path(src)
     if not src.exists():
@@ -156,18 +123,6 @@ def _copy_result_into_static(src: str | Path, job_id: str) -> str:
     return f"/static/results/{dest.name}"
 
 
-
-# ---------------------------------------------------------------------------
-# MCP Streamable HTTP client (remote WanGP)
-# Spec: POST JSON-RPC to http://host:port/mcp
-# Requires initialize + Mcp-Session-Id for many servers.
-# Tools: wangp_generate, wangp_get_job, wangp_list_models, wangp_create_gallery_upload
-# ---------------------------------------------------------------------------
-
-_mcp_req_id = 0
-_mcp_sessions: dict[str, str] = {}  # endpoint -> session id
-
-
 def _next_mcp_id() -> int:
     global _mcp_req_id
     _mcp_req_id += 1
@@ -175,54 +130,63 @@ def _next_mcp_id() -> int:
 
 
 def _mcp_endpoint(base: str) -> str:
-    base = (base or "").strip().rstrip("/")
+    """Always end with /mcp/ — WanGP returns 307 without trailing slash."""
+    base = (base or "").strip()
     if not base:
-        return base
+        return ""
+    # strip trailing slashes then normalize
+    base = base.rstrip("/")
     if base.endswith("/mcp"):
-        return base
-    return base + "/mcp"
+        return base + "/"
+    if "/mcp/" in base + "/":
+        # already has mcp somewhere
+        if not base.endswith("/mcp"):
+            pass
+    return base + "/mcp/"
 
 
 def _parse_sse_or_json(body: str, content_type: str) -> dict:
-    import json as _json
     ctype = (content_type or "").lower()
     body = body or ""
-    if "text/event-stream" in ctype or body.lstrip().startswith("event:") or "\ndata:" in body:
+    if (
+        "text/event-stream" in ctype
+        or body.lstrip().startswith("event:")
+        or "\ndata:" in body
+        or body.lstrip().startswith("data:")
+    ):
         last = None
         for line in body.splitlines():
             if line.startswith("data:"):
                 raw = line[5:].strip()
                 if raw and raw != "[DONE]":
                     try:
-                        last = _json.loads(raw)
+                        last = json.loads(raw)
                     except Exception:
                         pass
         if last is None:
-            raise RuntimeError(f"MCP SSE empty/unparseable: {body[:400]}")
+            raise RuntimeError(f"MCP SSE empty/unparseable: {body[:500]}")
         return last
     try:
-        return _json.loads(body)
+        return json.loads(body)
     except Exception as e:
-        raise RuntimeError(f"MCP non-JSON response: {e}; body={body[:400]}")
+        raise RuntimeError(f"MCP non-JSON: {e}; body={body[:500]}")
 
 
 def _parse_mcp_tool_result(data: dict) -> Any:
     if not isinstance(data, dict):
         return data
-    if "error" in data and data["error"]:
+    if data.get("error"):
         err = data["error"]
         if isinstance(err, dict):
             msg = err.get("message") or str(err)
-            extra = err.get("data")
-            if extra:
-                msg = f"{msg} | {extra}"
+            if err.get("data") is not None:
+                msg = f"{msg} | {err.get('data')}"
             raise RuntimeError(msg)
         raise RuntimeError(str(err))
     result = data.get("result", data)
     if not isinstance(result, dict):
         return result
     if result.get("isError"):
-        # tool-level error
         content = result.get("content") or []
         texts = []
         for item in content:
@@ -230,7 +194,7 @@ def _parse_mcp_tool_result(data: dict) -> Any:
                 texts.append(item.get("text") or str(item))
             else:
                 texts.append(str(item))
-        raise RuntimeError("; ".join(texts) or "MCP tool returned isError")
+        raise RuntimeError("; ".join(texts) or "MCP tool isError")
     if result.get("structuredContent") is not None:
         return result["structuredContent"]
     content = result.get("content")
@@ -243,9 +207,8 @@ def _parse_mcp_tool_result(data: dict) -> Any:
                 texts.append(item)
         joined = "\n".join(texts).strip()
         if joined:
-            import json as _json
             try:
-                return _json.loads(joined)
+                return json.loads(joined)
             except Exception:
                 return {"text": joined}
     return result
@@ -260,20 +223,11 @@ def mcp_raw_request(
     session_id: str | None = None,
     is_notification: bool = False,
 ) -> tuple[dict | None, str | None]:
-    """
-    Low-level JSON-RPC POST. Returns (parsed_body_or_None, session_id).
-    Notifications return (None, session_id).
-    """
-    import httpx
-
     endpoint = _mcp_endpoint(mcp_url)
     if not endpoint:
         raise RuntimeError("MCP URL is empty")
 
-    payload: dict[str, Any] = {
-        "jsonrpc": "2.0",
-        "method": method,
-    }
+    payload: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
     if not is_notification:
         payload["id"] = _next_mcp_id()
     if params is not None:
@@ -283,25 +237,28 @@ def mcp_raw_request(
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
     }
-    # Session header (Streamable HTTP)
     sid = session_id or _mcp_sessions.get(endpoint)
     if sid:
         headers["Mcp-Session-Id"] = sid
 
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         r = client.post(endpoint, json=payload, headers=headers)
-        new_sid = r.headers.get("mcp-session-id") or r.headers.get("Mcp-Session-Id") or sid
+        new_sid = (
+            r.headers.get("mcp-session-id")
+            or r.headers.get("Mcp-Session-Id")
+            or sid
+        )
         if new_sid:
             _mcp_sessions[endpoint] = new_sid
 
         if is_notification:
             if r.status_code not in (200, 202, 204):
-                raise RuntimeError(f"MCP notification HTTP {r.status_code}: {r.text[:300]}")
+                raise RuntimeError(f"MCP notification HTTP {r.status_code}: {r.text[:400]}")
             return None, new_sid
 
         if r.status_code >= 400:
             raise RuntimeError(
-                f"MCP HTTP {r.status_code} on {endpoint} method={method}: {r.text[:500]}"
+                f"MCP HTTP {r.status_code} {endpoint} method={method}: {r.text[:500]}"
             )
 
         data = _parse_sse_or_json(r.text, r.headers.get("content-type", ""))
@@ -309,7 +266,6 @@ def mcp_raw_request(
 
 
 def mcp_ensure_session(mcp_url: str, timeout: float = 30.0) -> str | None:
-    """Initialize MCP session (required by Streamable HTTP servers)."""
     endpoint = _mcp_endpoint(mcp_url)
     if endpoint in _mcp_sessions and _mcp_sessions[endpoint]:
         return _mcp_sessions[endpoint]
@@ -318,14 +274,13 @@ def mcp_ensure_session(mcp_url: str, timeout: float = 30.0) -> str | None:
         mcp_url,
         "initialize",
         {
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": "2025-03-26",
             "capabilities": {},
-            "clientInfo": {"name": "WanForge", "version": "1.0.0"},
+            "clientInfo": {"name": "WanForge", "version": "1.1.0"},
         },
         timeout=timeout,
         session_id=None,
     )
-    # notifications/initialized
     try:
         mcp_raw_request(
             mcp_url,
@@ -346,7 +301,6 @@ def mcp_ensure_session(mcp_url: str, timeout: float = 30.0) -> str | None:
 
 
 def mcp_call_tool(mcp_url: str, name: str, arguments: dict, timeout: float = 120.0) -> Any:
-    """tools/call with session handshake."""
     sid = mcp_ensure_session(mcp_url, timeout=min(30.0, timeout))
     data, _ = mcp_raw_request(
         mcp_url,
@@ -356,24 +310,17 @@ def mcp_call_tool(mcp_url: str, name: str, arguments: dict, timeout: float = 120
         session_id=sid,
     )
     if data is None:
-        raise RuntimeError(f"Empty MCP response for tools/call {name}")
+        raise RuntimeError(f"Empty MCP response for {name}")
     return _parse_mcp_tool_result(data)
 
 
 def mcp_upload_media(mcp_url: str, local_path: str) -> str:
-    """Gallery upload for remote MCP (paths on client are useless on remote host)."""
-    import httpx
-    from pathlib import Path as P
-
-    path = P(local_path)
+    path = Path(local_path)
     if not path.is_file():
         return str(local_path)
 
     create = mcp_call_tool(
-        mcp_url,
-        "wangp_create_gallery_upload",
-        {"filename": path.name},
-        timeout=60.0,
+        mcp_url, "wangp_create_gallery_upload", {"filename": path.name}, timeout=60.0
     )
     if not isinstance(create, dict):
         raise RuntimeError(f"gallery upload create failed: {create}")
@@ -387,10 +334,10 @@ def mcp_upload_media(mcp_url: str, local_path: str) -> str:
     gallery_id = create.get("gallery_id") or create.get("id") or create.get("item_id")
 
     if upload_url and str(upload_url).startswith("/"):
-        base = _mcp_endpoint(mcp_url)
-        if base.endswith("/mcp"):
-            base = base[:-4]
-        upload_url = base.rstrip("/") + str(upload_url)
+        origin = _mcp_endpoint(mcp_url).rstrip("/")
+        if origin.endswith("/mcp"):
+            origin = origin[:-4]
+        upload_url = origin.rstrip("/") + str(upload_url)
 
     if not upload_url:
         raise RuntimeError(f"No upload URL from wangp_create_gallery_upload: {create}")
@@ -406,13 +353,33 @@ def mcp_upload_media(mcp_url: str, local_path: str) -> str:
         try:
             body = put.json()
             if isinstance(body, dict):
-                gallery_id = body.get("gallery_id") or body.get("id") or body.get("item_id") or gallery_id
+                gallery_id = (
+                    body.get("gallery_id") or body.get("id") or body.get("item_id") or gallery_id
+                )
         except Exception:
             pass
 
     if not gallery_id:
-        raise RuntimeError(f"Upload OK but no gallery_id. create={create}")
+        raise RuntimeError(f"Upload OK but no gallery_id: {create}")
     return str(gallery_id)
+
+
+def _resolve_local_media(p: str | None) -> Optional[str]:
+    if not p:
+        return None
+    path = Path(p)
+    if path.is_file():
+        return str(path)
+    rel = str(p).lstrip("/")
+    for candidate in (
+        Path(__file__).parent.parent / rel,
+        UPLOAD_DIR / Path(p).name,
+        UPLOAD_DIR / "jobs" / Path(p).name,
+        Path(__file__).parent.parent / "static" / "uploads" / "jobs" / Path(p).name,
+    ):
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
@@ -423,51 +390,77 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         "force_fps": settings_cfg.get("default_fps") or "24",
     }
     source = _map_job_to_settings(job, defaults)
-
-    def resolve_local(p: str | None) -> str | None:
-        if not p:
-            return None
-        path = Path(p)
-        if path.is_file():
-            return str(path)
-        rel = str(p).lstrip("/")
-        candidate = Path(__file__).parent.parent / rel
-        if candidate.is_file():
-            return str(candidate)
-        candidate = UPLOAD_DIR / Path(p).name
-        if candidate.is_file():
-            return str(candidate)
-        jobs_dir = UPLOAD_DIR / "jobs" / Path(p).name
-        if jobs_dir.is_file():
-            return str(jobs_dir)
-        return str(p)
-
-    media_keys = (
+    for key in (
         "image_start", "image_end", "image_refs",
         "video_source", "video_guide", "audio_guide", "audio_guide2",
-    )
-    for key in media_keys:
+    ):
         val = source.get(key)
         if not val:
             continue
         if isinstance(val, list):
-            source[key] = [
-                mcp_upload_media(mcp_url, resolve_local(str(item)) or str(item))
-                if resolve_local(str(item)) and Path(resolve_local(str(item))).is_file()
-                else item
-                for item in val
-            ]
+            out = []
+            for item in val:
+                local = _resolve_local_media(str(item))
+                out.append(mcp_upload_media(mcp_url, local) if local else item)
+            source[key] = out
         else:
-            local = resolve_local(str(val))
-            if local and Path(local).is_file():
+            local = _resolve_local_media(str(val))
+            if local:
                 source[key] = mcp_upload_media(mcp_url, local)
     return source
+
+
+def _apply_mcp_result(job_id: str, result: dict) -> bool:
+    if not isinstance(result, dict):
+        db.update_job(job_id, {"error": f"Bad MCP result type: {type(result)}"})
+        return False
+
+    success = result.get("success")
+    files = result.get("generated_files") or result.get("files") or []
+    gallery = result.get("gallery_items") or []
+    errors = result.get("errors") or []
+
+    if success is False or (not files and not gallery and errors):
+        msgs = []
+        for err in errors:
+            msgs.append(err.get("message") if isinstance(err, dict) else str(err))
+        db.update_job(job_id, {"error": ("; ".join(msgs) or "MCP generation failed")[:800]})
+        return False
+
+    path = None
+    if files:
+        first = files[0]
+        path = first.get("path") if isinstance(first, dict) else str(first)
+    elif gallery:
+        g0 = gallery[0]
+        path = (g0.get("path") or g0.get("url") or g0.get("file")) if isinstance(g0, dict) else str(g0)
+    path = path or result.get("path") or result.get("output")
+    if not path:
+        db.update_job(job_id, {"error": f"No output in MCP result: {str(result)[:500]}"})
+        return False
+
+    if str(path).startswith(("http://", "https://")):
+        url = str(path)
+    else:
+        try:
+            url = _copy_result_into_static(path, job_id)
+        except Exception:
+            url = str(path)
+
+    db.update_job(job_id, {
+        "status": "completed",
+        "progress": 100,
+        "result_url": url,
+        "preview_url": url,
+        "error": None,
+    })
+    return True
 
 
 def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
     mcp_url = (settings_cfg.get("wan2gp_mcp_url") or "").strip()
     if not mcp_url:
-        db.update_job(job_id, {"error": "wan2gp_mcp_url is empty"})
+        db.update_job(job_id, {"error": "wan2gp_mcp_url is empty — set Admin → Wan2GP Server → MCP base URL"})
         return False
 
     try:
@@ -477,8 +470,7 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         db.update_job(job_id, {
             "error": (
                 f"Cannot reach MCP at {_mcp_endpoint(mcp_url)}: {e}. "
-                "Check host/port, firewall, and that WanGP was started with "
-                "`--mcp --mcp-transport streamable-http --mcp-host 0.0.0.0 --mcp-port <port>`."
+                "Use trailing /mcp/ and ensure the WanForge host can reach that IP:port."
             )[:800]
         })
         return False
@@ -490,7 +482,7 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         db.update_job(job_id, {"error": f"MCP media upload: {e}"[:800]})
         return False
 
-    logger.info("MCP wangp_generate → %s keys=%s", _mcp_endpoint(mcp_url), list(source.keys()))
+    logger.info("MCP wangp_generate → %s model=%s", _mcp_endpoint(mcp_url), source.get("model_type"))
 
     try:
         out = mcp_call_tool(
@@ -509,12 +501,11 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         remote_id = out.get("job_id") or out.get("id")
         if not remote_id and isinstance(out.get("job"), dict):
             remote_id = out["job"].get("id") or out["job"].get("job_id")
-        # wait=True style immediate result
-        if not remote_id and (out.get("generated_files") or out.get("success") is not None):
+        if not remote_id and (out.get("generated_files") is not None or out.get("success") is not None):
             return _apply_mcp_result(job_id, out)
 
     if not remote_id:
-        db.update_job(job_id, {"error": f"wangp_generate returned no job_id: {str(out)[:500]}"})
+        db.update_job(job_id, {"error": f"wangp_generate no job_id: {str(out)[:500]}"})
         return False
 
     db.update_job(job_id, {
@@ -523,7 +514,6 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         "params": {**(job.get("params") or {}), "mcp_job_id": remote_id},
     })
 
-    import time
     deadline = time.time() + float(settings_cfg.get("mcp_timeout_s") or 3600)
     last_err = None
     while time.time() < deadline:
@@ -536,7 +526,6 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
             )
         except Exception as e:
             last_err = str(e)
-            logger.warning("wangp_get_job: %s", e)
             time.sleep(2)
             continue
 
@@ -563,75 +552,19 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         time.sleep(2.0)
 
     db.update_job(job_id, {
-        "error": f"MCP job timed out (last poll error: {last_err})" if last_err else "MCP job timed out"
+        "error": f"MCP job timed out" + (f" (last: {last_err})" if last_err else "")
     })
     return False
 
 
-def _apply_mcp_result(job_id: str, result: dict) -> bool:
-    if not isinstance(result, dict):
-        db.update_job(job_id, {"error": f"Bad MCP result type: {type(result)}"})
-        return False
-
-    success = result.get("success")
-    files = result.get("generated_files") or result.get("files") or []
-    gallery = result.get("gallery_items") or []
-    errors = result.get("errors") or []
-
-    if success is False or (not files and not gallery and errors):
-        msgs = []
-        for err in errors:
-            if isinstance(err, dict):
-                msgs.append(err.get("message") or str(err))
-            else:
-                msgs.append(str(err))
-        msg = "; ".join(msgs) or "MCP generation failed"
-        db.update_job(job_id, {"error": msg[:800]})
-        return False
-
-    path = None
-    if files:
-        first = files[0]
-        path = first.get("path") if isinstance(first, dict) else str(first)
-    elif gallery:
-        g0 = gallery[0]
-        path = (g0.get("path") or g0.get("url") or g0.get("file")) if isinstance(g0, dict) else str(g0)
-
-    if not path:
-        path = result.get("path") or result.get("output")
-    if not path:
-        db.update_job(job_id, {"error": f"No output files in MCP result: {str(result)[:500]}"})
-        return False
-
-    if str(path).startswith("http://") or str(path).startswith("https://"):
-        url = str(path)
-    else:
-        # Remote server local path is not readable here — try gallery download if id-like
-        url = str(path)
-        try:
-            url = _copy_result_into_static(path, job_id)
-        except Exception:
-            pass
-
-    db.update_job(job_id, {
-        "status": "completed",
-        "progress": 100,
-        "result_url": url,
-        "preview_url": url,
-        "error": None,
-    })
-    logger.info("Job %s completed via MCP → %s", job_id, url)
-    return True
-
-
 async def process_job(job_id: str) -> None:
+    """Always MCP when configured. Never mock. Failures store error on the job."""
     job = db.get_job(job_id)
     if not job:
         return
 
     db.update_job(job_id, {"status": "processing", "progress": 5, "error": None})
     settings_cfg = db.get_settings()
-    root = (settings_cfg.get("wan2gp_root") or "").strip()
     mcp_url = (settings_cfg.get("wan2gp_mcp_url") or "").strip()
     enabled = bool(settings_cfg.get("wan2gp_enabled", False))
 
@@ -640,205 +573,60 @@ async def process_job(job_id: str) -> None:
             db.update_job(job_id, {
                 "status": "failed",
                 "progress": 0,
-                "error": "Wan2GP is disabled. Enable it in Admin → Wan2GP Server and set MCP URL.",
+                "error": "Wan2GP disabled. Enable in Admin → Wan2GP Server and set MCP URL ending with /mcp/",
             })
             return
 
-        if mcp_url:
-            ok = await asyncio.to_thread(_run_mcp_generate, job_id, job, settings_cfg)
-            if ok:
-                return
-            # Keep existing error from _run_mcp_generate if set
-            cur = db.get_job(job_id) or {}
-            err = (cur.get("error") or "").strip() or "MCP wangp_generate failed"
-            db.update_job(job_id, {"status": "failed", "progress": 0, "error": err[:800]})
+        if not mcp_url:
+            db.update_job(job_id, {
+                "status": "failed",
+                "progress": 0,
+                "error": "MCP URL empty. Set e.g. http://YOUR_HOST:8080/mcp/ in Admin → Wan2GP Server.",
+            })
             return
 
-        if root:
-            ok = await asyncio.to_thread(_run_wangp_api, job_id, job, settings_cfg)
-            if ok:
-                return
-            cur = db.get_job(job_id) or {}
-            err = (cur.get("error") or "").strip() or "WanGP local API failed"
-            db.update_job(job_id, {"status": "failed", "progress": 0, "error": err[:800]})
+        ok = await asyncio.to_thread(_run_mcp_generate, job_id, job, settings_cfg)
+        if ok:
             return
-
-        db.update_job(job_id, {
-            "status": "failed",
-            "progress": 0,
-            "error": "No MCP URL or WanGP install path configured. Set MCP base URL in Admin → Wan2GP Server.",
-        })
+        cur = db.get_job(job_id) or {}
+        err = (cur.get("error") or "").strip() or "MCP generation failed"
+        db.update_job(job_id, {"status": "failed", "progress": 0, "error": err[:800]})
     except Exception as e:
         logger.exception("Job %s failed", job_id)
-        db.update_job(job_id, {
-            "status": "failed",
-            "progress": 0,
-            "error": str(e)[:800],
-        })
-
-
-def _run_wangp_api(job_id: str, job: dict, settings_cfg: dict) -> bool:
-    """Official API.md: session.submit_task(settings) -> job.result()."""
-    root = settings_cfg.get("wan2gp_root", "").strip()
-    cli_raw = settings_cfg.get("wan2gp_cli_args") or "--attention sdpa --profile 4"
-    cli_args = [a for a in str(cli_raw).split() if a]
-
-    defaults = {
-        "model_type": settings_cfg.get("default_model_type") or "ltx2_22B_distilled",
-        "resolution": settings_cfg.get("default_resolution") or "1280x704",
-        "num_inference_steps": settings_cfg.get("default_steps") or 8,
-        "force_fps": settings_cfg.get("default_fps") or "24",
-    }
-    settings = _map_job_to_settings(job, defaults)
-    logger.info("WanGP submit_task: %s", {k: v for k, v in settings.items() if k != "_api"})
-
-    try:
-        session = _get_session(root, cli_args)
-    except Exception as e:
-        logger.exception("Failed to init WanGP session")
-        db.update_job(job_id, {"error": f"init failed: {e}"[:500]})
-        return False
-
-    db.update_job(job_id, {"progress": 15, "status": "processing"})
-
-    try:
-        wjob = session.submit_task(settings)
-        try:
-            for event in wjob.events.iter(timeout=0.5):
-                if event.kind == "progress":
-                    p = event.data
-                    ratio = float(getattr(p, "progress", 0) or 0)
-                    if ratio <= 1.0:
-                        ratio *= 100
-                    pct = max(15, min(95, int(ratio)))
-                    db.update_job(job_id, {"progress": pct, "status": "processing"})
-                if getattr(wjob, "done", False):
-                    break
-        except Exception as ev_err:
-            logger.debug("event iter: %s", ev_err)
-
-        result = wjob.result()
-        if not getattr(result, "success", False):
-            errors = getattr(result, "errors", None) or []
-            msgs = [getattr(err, "message", None) or str(err) for err in errors]
-            msg = "; ".join(msgs) or "WanGP generation failed"
-            logger.warning("WanGP result failed: %s", msg)
-            db.update_job(job_id, {"error": msg[:800]})
-            return False
-
-        files = list(getattr(result, "generated_files", None) or [])
-        if not files:
-            db.update_job(job_id, {"error": "WanGP returned no generated_files"})
-            return False
-
-        first = files[0]
-        if hasattr(first, "path"):
-            first = first.path
-        url = _copy_result_into_static(str(first), job_id)
-
-        db.update_job(job_id, {
-            "status": "completed",
-            "progress": 100,
-            "result_url": url,
-            "preview_url": url,
-            "error": None,
-        })
-        logger.info("Job %s completed via WanGP API → %s", job_id, url)
-        return True
-
-    except Exception as e:
-        logger.exception("WanGP submit_task error")
-        db.update_job(job_id, {"error": f"submit_task: {e}"[:800]})
-        return False
-
-
-async def _mock_generation(job_id: str, job: dict) -> None:
-    db.update_job(job_id, {
-        "status": "failed",
-        "progress": 0,
-        "error": "Generation backend unavailable (mock removed)",
-    })
+        db.update_job(job_id, {"status": "failed", "progress": 0, "error": str(e)[:800]})
 
 
 async def test_wan2gp_connection(url: str = "", root: str = "", mcp_url: str = "") -> dict:
-    """Diagnose remote MCP / local root connectivity."""
-    root = (root or "").strip()
-    url = (url or "").rstrip("/")
+    """Validate real MCP handshake + wangp_list_models (not Gradio, not bare HTTP)."""
     mcp_url = (mcp_url or "").strip()
+    if not mcp_url:
+        return {
+            "ok": False,
+            "message": "Set MCP base URL (http://HOST:PORT/mcp/) — Gradio URL alone is not enough.",
+            "version": None,
+        }
 
-    if mcp_url:
-        endpoint = _mcp_endpoint(mcp_url)
-        try:
-            # Clear cached session for a clean test
-            _mcp_sessions.pop(endpoint, None)
-            sid = await asyncio.to_thread(mcp_ensure_session, mcp_url, 20.0)
-            try:
-                out = await asyncio.to_thread(
-                    mcp_call_tool, mcp_url, "wangp_list_models", {"limit": 3}, 25.0
-                )
-                n = len(out) if isinstance(out, list) else 1
-                return {
-                    "ok": True,
-                    "message": f"MCP OK {endpoint} (session={bool(sid)}, models sample={n})",
-                    "version": "mcp",
-                    "endpoint": endpoint,
-                }
-            except Exception as tool_err:
-                return {
-                    "ok": True,
-                    "message": (
-                        f"MCP session OK at {endpoint}, but wangp_list_models failed: {tool_err}. "
-                        "Server is reachable; tool name may differ on this build."
-                    ),
-                    "version": "mcp-session",
-                    "endpoint": endpoint,
-                }
-        except Exception as e:
-            return {
-                "ok": False,
-                "message": (
-                    f"Cannot talk to MCP at {endpoint}: {e}. "
-                    "1) Confirm WanGP MCP is running with streamable-http on that host/port. "
-                    "2) URL must be reachable FROM the machine running WanForge (not only from your browser). "
-                    "3) Use http://HOST:PORT/mcp (include /mcp). "
-                    "4) Open firewall for that port."
-                ),
-                "version": None,
-                "endpoint": endpoint,
-            }
-
-    if root:
-        try:
-            rp = Path(root)
-            if not rp.is_dir():
-                return {"ok": False, "message": f"Path not found: {root}", "version": None}
-            if not (rp / "shared" / "api.py").exists():
-                return {"ok": False, "message": f"shared/api.py not found under {root}", "version": None}
-            if str(rp) not in sys.path:
-                sys.path.insert(0, str(rp))
-            import shared.api  # noqa: F401
-            return {"ok": True, "message": "Local WanGP install found", "version": "python-api"}
-        except Exception as e:
-            return {"ok": False, "message": str(e)[:300], "version": None}
-
-    if url:
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                r = await client.get(f"{url}/config")
-                if r.status_code == 200:
-                    return {
-                        "ok": True,
-                        "message": "Gradio reachable — for generation set MCP URL, not only Gradio URL.",
-                        "version": "gradio",
-                    }
-                return {"ok": False, "message": f"HTTP {r.status_code}", "version": None}
-        except Exception as e:
-            return {"ok": False, "message": str(e)[:200], "version": None}
-
-    return {
-        "ok": False,
-        "message": "Set MCP base URL (e.g. http://REMOTE:8080/mcp) and enable Wan2GP.",
-        "version": None,
-    }
-
+    endpoint = _mcp_endpoint(mcp_url)
+    try:
+        _mcp_sessions.pop(endpoint, None)
+        sid = await asyncio.to_thread(mcp_ensure_session, mcp_url, 20.0)
+        out = await asyncio.to_thread(
+            mcp_call_tool, mcp_url, "wangp_list_models", {"limit": 5}, 30.0
+        )
+        n = len(out) if isinstance(out, list) else "?"
+        return {
+            "ok": True,
+            "message": f"MCP OK {endpoint} session={bool(sid)} wangp_list_models={n}",
+            "version": "mcp-2025-03-26",
+            "endpoint": endpoint,
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "message": (
+                f"MCP failed at {endpoint}: {e}. "
+                "Confirm trailing /mcp/, protocol 2025-03-26, and network from this host."
+            ),
+            "version": None,
+            "endpoint": endpoint,
+        }

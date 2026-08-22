@@ -15,7 +15,7 @@
     
     <div>
       <label class="block text-sm font-medium mb-1.5">MCP base URL (recommended)</label>
-      <input id="wan2gp_mcp_url" value="{{ settings.wan2gp_mcp_url or '' }}" placeholder="http://YOUR_REMOTE_HOST:8080/mcp" placeholder="http://YOUR_REMOTE_HOST:8080/mcp"
+      <input id="wan2gp_mcp_url" value="{{ settings.wan2gp_mcp_url or '' }}" placeholder="http://YOUR_REMOTE_HOST:8080/mcp/" placeholder="http://YOUR_REMOTE_HOST:8080/mcp/"
         class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
       <p class="text-xs text-slate-400 mt-1">WanGP Streamable HTTP MCP endpoint. Tools: <code>wangp_generate</code>, <code>wangp_get_job</code>, <code>wangp_list_models</code>, … Launch with <code>python wgp.py --mcp --mcp-transport streamable-http --mcp-host 0.0.0.0 --mcp-port 8080</code></p>
     </div>
