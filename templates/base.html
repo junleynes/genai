@@ -58,12 +58,34 @@
       color: var(--brand);
       font-weight: 600;
     }
+    /* Landing: full-bleed, no app chrome */
+    body.is-landing #sidebar,
+    body.is-landing #sidebar-overlay,
+    body.is-landing #mobile-menu-btn {
+      display: none !important;
+    }
+    body.is-landing #main-column {
+      padding-left: 0 !important;
+    }
   </style>
   {% block head %}{% endblock %}
 </head>
 <body class="h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 transition-colors duration-300">
+  <script>
+    // Apply before paint to avoid flash of sidebar on home
+    (function () {
+      var p = location.pathname.replace(/\/$/, '') || '/';
+      if (p === '/') document.documentElement.classList.add('landing-pending');
+    })();
+  </script>
+  <style>
+    html.landing-pending #sidebar,
+    html.landing-pending #sidebar-overlay,
+    html.landing-pending #mobile-menu-btn { display: none !important; }
+    html.landing-pending #main-column { padding-left: 0 !important; }
+  </style>
   <div id="app" class="min-h-full flex">
-    <!-- Sidebar -->
+    <!-- Sidebar (app pages only) -->
     <aside id="sidebar" class="hidden fixed inset-y-0 left-0 z-40 w-64 flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 md:flex">
       <div class="h-16 flex items-center gap-2.5 px-4 border-b border-slate-200 dark:border-slate-800">
         <a href="/" class="flex items-center gap-2.5 min-w-0">
@@ -93,35 +115,18 @@
       </div>
     </aside>
 
-    <!-- Mobile overlay -->
     <div id="sidebar-overlay" class="hidden fixed inset-0 z-30 bg-black/40 md:hidden"></div>
 
-    <!-- Main column -->
-    <div id="main-column" class="flex-1 flex flex-col min-w-0 min-h-full md:pl-64">
-      <!-- Top bar (mobile + public) -->
-      <header class="sticky top-0 z-20 border-b border-slate-200/80 dark:border-slate-800 glass">
-        <div class="flex h-14 items-center justify-between gap-3 px-4">
-          <div class="flex items-center gap-2">
-            <button id="sidebar-open" type="button" class="md:hidden p-2 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800" aria-label="Menu">
-              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
-            </button>
-            <a href="/" class="md:hidden font-semibold text-sm truncate max-w-[12rem]">{{ settings.app_name }}</a>
-            <span id="page-title-hint" class="hidden md:inline text-sm text-slate-500 dark:text-slate-400"></span>
-          </div>
-          <div class="flex items-center gap-2">
-            <button id="theme-toggle-top" type="button" class="md:hidden p-2 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800" title="Toggle theme">
-              <svg class="w-5 h-5 dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
-              <svg class="w-5 h-5 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-            </button>
-            <div id="auth-area" class="flex items-center gap-2"></div>
-          </div>
-        </div>
-      </header>
+    <!-- Floating mobile menu (app pages only) -->
+    <button id="mobile-menu-btn" type="button" class="md:hidden fixed top-3 left-3 z-50 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-lg" aria-label="Menu">
+      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
 
+    <!-- Main column — no top nav -->
+    <div id="main-column" class="flex-1 flex flex-col min-w-0 min-h-full md:pl-64">
       <main class="flex-1">
         {% block content %}{% endblock %}
       </main>
-
       <footer class="border-t border-slate-200 dark:border-slate-800 py-6 mt-auto">
         <div class="max-w-7xl mx-auto px-4 text-center text-sm text-slate-500 dark:text-slate-400">
           {{ settings.footer }}

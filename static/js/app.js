@@ -116,19 +116,7 @@ function renderNav() {
   }
 
   if (authArea) {
-    if (user) {
-      authArea.innerHTML = `
-        <span class="hidden sm:inline text-xs text-slate-500 truncate max-w-[10rem]">${escapeHtml(user.name || user.email)}</span>
-        <button type="button" onclick="logout()" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Logout</button>
-      `;
-    } else if (path !== '/login' && path !== '/register') {
-      authArea.innerHTML = `
-        <a href="/login" class="text-sm px-3 py-1.5 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800">Log in</a>
-        <a href="/register" class="text-sm px-3 py-1.5 rounded-lg btn-brand shadow-sm">Sign up</a>
-      `;
-    } else {
-      authArea.innerHTML = '';
-    }
+    authArea.innerHTML = '';
   }
 }
 
@@ -201,18 +189,45 @@ function typeLabel(t) {
   return map[t] || t;
 }
 
+function isLandingPage() {
+  const p = (location.pathname || '/').replace(/\/$/, '') || '/';
+  return p === '/';
+}
+
+function applyLayoutMode() {
+  const landing = isLandingPage();
+  document.body.classList.toggle('is-landing', landing);
+  document.documentElement.classList.remove('landing-pending');
+  const main = document.getElementById('main-column');
+  if (main) {
+    if (landing) {
+      main.classList.remove('md:pl-64');
+    } else {
+      main.classList.add('md:pl-64');
+    }
+  }
+  const sidebar = document.getElementById('sidebar');
+  if (landing) {
+    sidebar?.classList.add('hidden');
+    sidebar?.classList.remove('flex');
+  } else if (window.matchMedia('(min-width: 768px)').matches) {
+    sidebar?.classList.remove('hidden');
+    sidebar?.classList.add('flex');
+  }
+}
+
 function initSidebarMobile() {
   const sidebar = document.getElementById('sidebar');
   const overlay = document.getElementById('sidebar-overlay');
-  const openBtn = document.getElementById('sidebar-open');
+  const openBtn = document.getElementById('mobile-menu-btn');
   const open = () => {
+    if (isLandingPage()) return;
     sidebar?.classList.remove('hidden');
     sidebar?.classList.add('flex');
     overlay?.classList.remove('hidden');
   };
   const close = () => {
-    // only hide on mobile
-    if (window.matchMedia('(min-width: 768px)').matches) return;
+    if (window.matchMedia('(min-width: 768px)').matches && !isLandingPage()) return;
     sidebar?.classList.add('hidden');
     sidebar?.classList.remove('flex');
     overlay?.classList.add('hidden');
@@ -223,8 +238,8 @@ function initSidebarMobile() {
 
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
+  applyLayoutMode();
   document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
-  document.getElementById('theme-toggle-top')?.addEventListener('click', toggleTheme);
   renderNav();
   initSidebarMobile();
 });

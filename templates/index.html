@@ -1,6 +1,46 @@
 {% extends "base.html" %}
 {% block title %}{{ settings.app_name }} – {{ settings.tagline }}{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const el = document.getElementById('landing-auth');
+  if (!el) return;
+  const user = getUser();
+  if (user) {
+    el.innerHTML = `
+      <a href="/generate" class="text-sm px-3 py-1.5 rounded-lg btn-brand shadow-sm">Generate</a>
+      <a href="/jobs" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700">Jobs</a>
+    `;
+  } else {
+    el.innerHTML = `
+      <a href="/login" class="text-sm px-3 py-1.5 rounded-lg hover:bg-white/60 dark:hover:bg-slate-800/60">Log in</a>
+      <a href="/register" class="text-sm px-3 py-1.5 rounded-lg btn-brand shadow-sm">Sign up</a>
+    `;
+  }
+})();
+</script>
+{% endblock %}
+
 {% block content %}
+
+<!-- Landing-only chrome (no app sidebar / top nav) -->
+<div id="landing-chrome" class="fixed top-0 inset-x-0 z-50">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+    <a href="/" class="flex items-center gap-2 font-semibold text-sm">
+      {% if settings.logo_url %}
+      <img src="{{ settings.logo_url }}" alt="" class="h-7 w-auto rounded" />
+      {% endif %}
+      <span class="truncate max-w-[14rem]">{{ settings.app_name }}</span>
+    </a>
+    <div class="flex items-center gap-2">
+      <button type="button" onclick="toggleTheme()" class="p-2 rounded-lg hover:bg-white/60 dark:hover:bg-slate-800/60 transition" title="Theme">
+        <svg class="w-5 h-5 dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+        <svg class="w-5 h-5 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+      </button>
+      <div id="landing-auth" class="flex items-center gap-2"></div>
+    </div>
+  </div>
+</div>
 <!-- Hero -->
 <section class="relative overflow-hidden">
   <div class="absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/50"></div>
