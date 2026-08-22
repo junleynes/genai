@@ -1477,6 +1477,10 @@ def list_models_for_job_type(mcp_url: str, job_type: str, limit: int = 120) -> l
     return filtered[:limit]
 
 
+# Optional callback set by main: callable(list_of_job_ids_to_start)
+_on_job_finished = None
+
+
 async def process_job(job_id: str) -> None:
     """Always MCP when configured. Never mock. Failures store error on the job."""
     job = db.get_job(job_id)
@@ -1509,11 +1513,22 @@ async def process_job(job_id: str) -> None:
         if ok:
             return
         cur = db.get_job(job_id) or {}
+        if cur.get("status") in ("cancelled", "canceled"):
+            return
         err = (cur.get("error") or "").strip() or "MCP generation failed"
         db.update_job(job_id, {"status": "failed", "progress": 0, "error": err[:800]})
     except Exception as e:
         logger.exception("Job %s failed", job_id)
         db.update_job(job_id, {"status": "failed", "progress": 0, "error": str(e)[:800]})
+    finally:
+        # Kick queue after this job leaves processing
+        try:
+            next_ids = try_start_queued_jobs()
+            if next_ids and _on_job_finished:
+                _on_job_finished(next_ids)
+        except Exception:
+            logger.exception("queue kick failed")
+
 
 
 async def test_wan2gp_connection(url: str = "", root: str = "", mcp_url: str = "") -> dict:
@@ -1550,3 +1565,31 @@ async def test_wan2gp_connection(url: str = "", root: str = "", mcp_url: str = "
             "version": None,
             "endpoint": endpoint,
         }
+
+
+
+def try_start_queued_jobs() -> list[str]:
+    """Start queued jobs up to concurrency limits. Returns started job ids."""
+    settings = db.get_settings()
+    max_c = max(1, int(settings.get("max_concurrent_jobs") or 1))
+    scope = (settings.get("concurrent_scope") or "overall").lower()
+    started = []
+    for job in db.list_queued_jobs(limit=100):
+        uid = job.get("user_id") or ""
+        if scope == "per_user":
+            active = db.count_active_jobs(uid)
+        else:
+            active = db.count_active_jobs(None)
+        if active >= max_c:
+            if scope == "per_user":
+                continue  # try another user's job
+            break
+        jid = job["id"]
+        # claim: only if still queued
+        cur = db.get_job(jid)
+        if not cur or cur.get("status") != "queued":
+            continue
+        db.update_job(jid, {"status": "processing", "progress": 1, "error": None})
+        started.append(jid)
+        # fire async via asyncio if loop running — caller uses BackgroundTasks
+    return started

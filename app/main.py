@@ -23,13 +23,29 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from . import auth, db
-from .generation import process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type
+from . import generation as gen_mod
+from .generation import process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type, try_start_queued_jobs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("genai")
 
 BASE = Path(__file__).parent.parent
+
 app = FastAPI(title="Opensource Generative AI", version="1.0.0")
+
+
+@app.on_event("startup")
+async def _startup_queue_hook():
+    def _kick(ids):
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+        for jid in ids:
+            loop.create_task(process_job(jid))
+    gen_mod._on_job_finished = _kick
+    logger.info("Opensource Generative AI ready")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
@@ -101,7 +117,10 @@ class ServerConfigIn(BaseModel):
     default_model_type: str = "ltx2_22B_distilled"
     default_resolution: str = "1280x704"
     default_steps: int = 8
-    allow_mock_fallback: bool = True
+    allow_mock_fallback: bool = False
+    queue_enabled: bool = True
+    max_concurrent_jobs: int = 1
+    concurrent_scope: str = "overall"  # overall | per_user
 
 
 class UserUpdateIn(BaseModel):
@@ -172,6 +191,14 @@ def update_branding(body: BrandingIn, admin: dict = Depends(auth.require_admin))
 
 @app.put("/api/admin/server")
 async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require_admin)):
+    scope = (body.concurrent_scope or "overall").strip().lower()
+    if scope not in ("overall", "per_user"):
+        scope = "overall"
+    max_c = int(body.max_concurrent_jobs or 1)
+    if max_c < 1:
+        max_c = 1
+    if max_c > 32:
+        max_c = 32
     return db.update_settings({
         "wan2gp_url": (body.wan2gp_url or "").strip(),
         "wan2gp_root": (body.wan2gp_root or "").strip(),
@@ -182,6 +209,9 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "default_resolution": (body.default_resolution or "").strip() or "1280x704",
         "default_steps": int(body.default_steps or 8),
         "allow_mock_fallback": bool(body.allow_mock_fallback),
+        "queue_enabled": bool(body.queue_enabled),
+        "max_concurrent_jobs": max_c,
+        "concurrent_scope": scope,
     })
 
 
@@ -317,13 +347,22 @@ async def retry_job(
         "preview_url": None,
         "completed_at": None,
     })
-    background_tasks.add_task(process_job, job_id)
+    settings = db.get_settings()
+    ok_start, reason = db.can_start_job(job["user_id"], settings)
+    if not ok_start and reason != "queued":
+        raise HTTPException(429, reason)
+    if ok_start:
+        background_tasks.add_task(process_job, job_id)
     return db.get_job(job_id)
 
 
 
 @app.post("/api/jobs/{job_id}/cancel")
-async def cancel_job(job_id: str, user: dict = Depends(auth.get_current_user)):
+async def cancel_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(auth.get_current_user),
+):
     """Cancel a queued/processing job; best-effort MCP wangp_cancel_job."""
     job = db.get_job(job_id)
     if not job:
@@ -359,6 +398,11 @@ async def cancel_job(job_id: str, user: dict = Depends(auth.get_current_user)):
             })
             updated = db.get_job(job_id)
 
+    try:
+        for jid in try_start_queued_jobs():
+            background_tasks.add_task(process_job, jid)
+    except Exception:
+        logger.exception("queue kick after cancel")
     return updated
 
 
@@ -442,6 +486,11 @@ async def create_job(
     if not prompt_clean and job_type in ("t2v", "t2i"):
         raise HTTPException(400, "Prompt is required for text-based generation")
 
+    settings = db.get_settings()
+    ok_start, reason = db.can_start_job(user["id"], settings)
+    if not ok_start and reason != "queued":
+        raise HTTPException(429, reason)
+
     job = db.create_job(
         user_id=user["id"],
         job_type=job_type,
@@ -450,7 +499,11 @@ async def create_job(
         params=params,
         title=(title or "").strip(),
     )
-    background_tasks.add_task(process_job, job["id"])
+    if ok_start:
+        background_tasks.add_task(process_job, job["id"])
+    else:
+        # stays queued until capacity frees
+        db.update_job(job["id"], {"status": "queued", "progress": 0})
     return job
 
 

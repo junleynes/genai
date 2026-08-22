@@ -55,7 +55,12 @@ DEFAULT_SETTINGS = {
     "default_steps": 8,
     "default_fps": "24",
     "allow_mock_fallback": False,
+    # Job queue
+    "queue_enabled": True,
+    "max_concurrent_jobs": 1,
+    "concurrent_scope": "overall",  # overall | per_user
 }
+
 
 
 def get_settings() -> dict:
@@ -222,3 +227,49 @@ def delete_job(job_id: str, user_id: Optional[str] = None) -> bool:
         if found:
             _save(JOBS_FILE, new_jobs)
         return found
+
+
+def count_active_jobs(user_id: Optional[str] = None) -> int:
+    """Jobs currently processing (and optionally scoped to a user)."""
+    with _lock:
+        jobs = _load(JOBS_FILE, [])
+        n = 0
+        for j in jobs:
+            if j.get("status") != "processing":
+                continue
+            if user_id and j.get("user_id") != user_id:
+                continue
+            n += 1
+        return n
+
+
+def list_queued_jobs(limit: int = 50) -> list:
+    """Oldest queued jobs first."""
+    with _lock:
+        jobs = _load(JOBS_FILE, [])
+        q = [j for j in jobs if j.get("status") == "queued"]
+        q.sort(key=lambda x: x.get("created_at") or "")
+        return q[:limit]
+
+
+def can_start_job(user_id: str, settings: Optional[dict] = None) -> tuple:
+    """
+    Return (ok: bool, reason: str).
+    If queue_enabled is False and capacity is full, reject new work.
+    If queue_enabled is True and full, job may still be created as queued.
+    """
+    s = settings or get_settings()
+    max_c = int(s.get("max_concurrent_jobs") or 1)
+    if max_c < 1:
+        max_c = 1
+    scope = (s.get("concurrent_scope") or "overall").lower()
+    if scope == "per_user":
+        active = count_active_jobs(user_id)
+    else:
+        active = count_active_jobs(None)
+    if active < max_c:
+        return True, ""
+    if s.get("queue_enabled", True):
+        return False, "queued"  # may wait
+    return False, f"Concurrency limit reached ({active}/{max_c}, scope={scope}). Queue is disabled."
+
