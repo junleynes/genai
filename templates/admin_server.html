@@ -21,6 +21,19 @@
     </div>
 
     <div>
+      <label class="block text-sm font-medium mb-1.5">Outputs HTTP base (optional fallback)</label>
+      <input id="wan2gp_outputs_http_base" value="{{ settings.wan2gp_outputs_http_base or '' }}" placeholder="http://WANGP_HOST:8090"
+        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
+      <p class="text-xs text-slate-400 mt-1">
+        If MCP Gallery download is empty, the app fetches <code>filename</code> from this URL.
+        On the WanGP PC run e.g.
+        <code class="text-[11px]">python -m http.server 8090 --directory C:\AI-Tools\Wan2GP\outputs</code>
+        then set this to <code>http://WANGP_IP:8090</code>.
+      </p>
+    </div>
+
+
+    <div>
       <label class="block text-sm font-medium mb-1.5">WanGP install path (optional local fallback)</label>
       <input name="wan2gp_root" id="wan2gp_root" value="{{ settings.wan2gp_root or '' }}" placeholder="/path/to/Wan2GP"
         class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
@@ -128,6 +141,7 @@ function payload() {
     queue_enabled: document.getElementById('queue_enabled').checked,
     max_concurrent_jobs: parseInt(document.getElementById('max_concurrent_jobs').value, 10) || 1,
     concurrent_scope: document.getElementById('concurrent_scope').value || 'overall',
+    wan2gp_outputs_http_base: document.getElementById('wan2gp_outputs_http_base').value.trim(),
   };
 }
 

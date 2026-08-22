@@ -121,6 +121,7 @@ class ServerConfigIn(BaseModel):
     queue_enabled: bool = True
     max_concurrent_jobs: int = 1
     concurrent_scope: str = "overall"  # overall | per_user
+    wan2gp_outputs_http_base: str = ""
 
 
 class UserUpdateIn(BaseModel):
@@ -212,6 +213,7 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "queue_enabled": bool(body.queue_enabled),
         "max_concurrent_jobs": max_c,
         "concurrent_scope": scope,
+        "wan2gp_outputs_http_base": (body.wan2gp_outputs_http_base or "").strip().rstrip("/"),
     })
 
 

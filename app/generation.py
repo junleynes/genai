@@ -26,7 +26,7 @@ logger = logging.getLogger("genai.generation")
 
 # Deployed-code fingerprint — GET /api/version must show this
 BACKEND_ID = "mcp-streamable-http-v2-no-mock"
-BACKEND_BUILT = "2026-08-23-gallery-retry"
+BACKEND_BUILT = "2026-08-23-outputs-http"
 
 UPLOAD_DIR = Path(__file__).parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -594,6 +594,56 @@ def _normalize_gallery_items(raw) -> list[dict]:
     return out
 
 
+def mcp_list_tool_names(mcp_url: str) -> list[str]:
+    try:
+        data, _ = mcp_raw_request(mcp_url, "tools/list", {}, timeout=20.0)
+        if not isinstance(data, dict):
+            return []
+        result = data.get("result") or data
+        tools = result.get("tools") if isinstance(result, dict) else []
+        names = []
+        for tool in tools or []:
+            if isinstance(tool, dict) and tool.get("name"):
+                names.append(str(tool["name"]))
+        return names
+    except Exception as e:
+        logger.warning("tools/list failed: %s", e)
+        return []
+
+
+def mcp_download_via_outputs_http(base_url: str, remote_path: str, job_id: str) -> str:
+    """Fetch by filename from a static HTTP root pointing at WanGP outputs/."""
+    base = (base_url or "").strip().rstrip("/")
+    if not base:
+        raise RuntimeError("outputs HTTP base empty")
+    name = Path(str(remote_path).replace("\\", "/")).name
+    if not name:
+        raise RuntimeError("no filename in path")
+    from urllib.parse import quote
+    candidates = [
+        f"{base}/{quote(name)}",
+        f"{base}/{name}",
+        f"{base}/{quote(name, safe='')}",
+    ]
+    # also try URL-encoded spaces from original
+    last_err = None
+    with httpx.Client(timeout=120.0, follow_redirects=True) as client:
+        for u in candidates:
+            try:
+                r = client.get(u)
+                if r.status_code == 200 and r.content and len(r.content) > 64:
+                    ct = (r.headers.get("content-type") or "").lower()
+                    if "text/html" in ct and b"<html" in r.content[:200].lower():
+                        last_err = f"HTML at {u}"
+                        continue
+                    ext = Path(name).suffix or ".bin"
+                    return _save_bytes_result(job_id, r.content, ext)
+                last_err = f"HTTP {r.status_code} {u}"
+            except Exception as e:
+                last_err = str(e)
+    raise RuntimeError(f"outputs HTTP fetch failed: {last_err}")
+
+
 def mcp_fetch_result_via_gallery(mcp_url: str, job_id: str, remote_path: str | None = None) -> str:
     """
     MCP-only transfer (no Gradio):
@@ -613,17 +663,18 @@ def mcp_fetch_result_via_gallery(mcp_url: str, job_id: str, remote_path: str | N
     )
 
     items: list[dict] = []
+    call_errors: list[str] = []
     last_raw = None
-    # Gallery may lag a moment after job completion
-    for attempt in range(5):
+    for attempt in range(4):
         if attempt:
-            time.sleep(1.5 * attempt)
+            time.sleep(1.2 * attempt)
         for tool, args in attempts:
             try:
                 raw = mcp_call_tool(mcp_url, tool, args, timeout=45.0)
                 last_raw = raw
             except Exception as e:
-                logger.debug("%s failed: %s", tool, e)
+                call_errors.append(f"{tool}: {e}")
+                logger.warning("gallery tool %s failed: %s", tool, e)
                 continue
             batch = _normalize_gallery_items(raw)
             for it in batch:
@@ -633,11 +684,13 @@ def mcp_fetch_result_via_gallery(mcp_url: str, job_id: str, remote_path: str | N
             break
 
     if not items:
+        tool_names = mcp_list_tool_names(mcp_url)
+        gallery_tools = [n for n in tool_names if "gallery" in n.lower()]
         raise RuntimeError(
-            "wangp_list_gallery returned no items after retries. "
-            "WanGP MCP gallery is empty for this session — "
-            "outputs may not be registered for HTTP download. "
-            f"last_raw={str(last_raw)[:200]}"
+            "wangp_list_gallery returned no items. "
+            + (f"tool_errors=[{'; '.join(call_errors)[:350]}] " if call_errors else "")
+            + (f"gallery_tools_on_server={gallery_tools or 'none'} " if tool_names else "tools/list unavailable ")
+            + f"last_raw={str(last_raw)[:180]}"
         )
 
     def score(it: dict) -> int:
@@ -655,10 +708,6 @@ def mcp_fetch_result_via_gallery(mcp_url: str, job_id: str, remote_path: str | N
             s += 100
         if gid:
             s += 5
-        # prefer image extensions when path was jpg
-        if name and name.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
-            if n.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
-                s += 10
         return s
 
     items_sorted = sorted(items, key=score, reverse=True)
@@ -977,6 +1026,28 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
         except Exception as e:
             transfer_errors.append(f"list_gallery: {e}")
             logger.warning("gallery list transfer failed: %s", e)
+
+    # 6b) Static HTTP server root for WanGP outputs/ (reliable when gallery is empty)
+    if not url:
+        try:
+            settings = db.get_settings()
+            out_base = (settings.get("wan2gp_outputs_http_base") or "").strip()
+            paths = _walk_file_paths(result)
+            hint = paths[0] if paths else None
+            if not hint:
+                # also check generated_files strings
+                for f in (result.get("generated_files") or []):
+                    if isinstance(f, str):
+                        hint = f
+                        break
+                    if isinstance(f, dict) and f.get("path"):
+                        hint = f["path"]
+                        break
+            if out_base and hint:
+                url = mcp_download_via_outputs_http(out_base, hint, job_id)
+        except Exception as e:
+            transfer_errors.append(f"outputs_http: {e}")
+            logger.warning("outputs http transfer failed: %s", e)
 
     if not url:
         msg = (

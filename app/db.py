@@ -48,6 +48,7 @@ DEFAULT_SETTINGS = {
     "wan2gp_url": "http://localhost:7860",
     "wan2gp_root": "",
     "wan2gp_mcp_url": "",
+    "wan2gp_outputs_http_base": "",  # e.g. http://HOST:8090 serving WanGP outputs/
     "wan2gp_enabled": False,
     "wan2gp_cli_args": "--attention sdpa --profile 4",
     "default_model_type": "ltx2_22B_distilled",
