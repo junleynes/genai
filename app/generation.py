@@ -26,7 +26,7 @@ logger = logging.getLogger("wanforge.generation")
 
 # Deployed-code fingerprint — GET /api/version must show this
 BACKEND_ID = "mcp-streamable-http-v2-no-mock"
-BACKEND_BUILT = "2026-08-23-mcp-gallery-transfer"
+BACKEND_BUILT = "2026-08-23-mcp-gallery-v2"
 
 UPLOAD_DIR = Path(__file__).parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -440,33 +440,77 @@ def _save_bytes_result(job_id: str, data: bytes, ext: str = ".png") -> str:
     return f"/static/results/{dest.name}"
 
 
+def _rewrite_transfer_url(url: str, mcp_url: str) -> str:
+    """Relative or localhost download URLs must use the MCP host WanForge can reach."""
+    url = str(url).strip()
+    origin = _mcp_origin(mcp_url)
+    if not url:
+        return url
+    if url.startswith("/"):
+        return origin.rstrip("/") + url
+    try:
+        from urllib.parse import urlparse, urlunparse
+        u = urlparse(url)
+        o = urlparse(origin)
+        host = (u.hostname or "").lower()
+        if host in ("127.0.0.1", "localhost", "0.0.0.0", "::1") or not host:
+            # keep path/query, swap host/port to MCP origin
+            return urlunparse((
+                o.scheme or "http",
+                o.netloc,
+                u.path or "",
+                u.params,
+                u.query,
+                u.fragment,
+            ))
+    except Exception:
+        pass
+    return url
+
+
 def mcp_download_gallery_item(mcp_url: str, gallery_id: str, job_id: str) -> str:
     """Use wangp_create_gallery_download then GET the short-lived URL onto this server."""
-    create = mcp_call_tool(
-        mcp_url,
-        "wangp_create_gallery_download",
+    # try several argument shapes
+    last_err = None
+    create = None
+    for args in (
         {"gallery_id": gallery_id},
-        timeout=60.0,
-    )
+        {"id": gallery_id},
+        {"item_id": gallery_id},
+        {"gallery_id": str(gallery_id)},
+    ):
+        try:
+            create = mcp_call_tool(
+                mcp_url, "wangp_create_gallery_download", args, timeout=60.0
+            )
+            if create:
+                break
+        except Exception as e:
+            last_err = e
+            create = None
     if not isinstance(create, dict):
-        raise RuntimeError(f"gallery download create failed: {create}")
+        raise RuntimeError(f"gallery download create failed: {last_err or create}")
 
     url = (
         create.get("url")
         or create.get("download_url")
         or create.get("get_url")
         or create.get("href")
+        or create.get("uri")
     )
+    if not url and isinstance(create.get("data"), dict):
+        d = create["data"]
+        url = d.get("url") or d.get("download_url") or d.get("href")
     if not url:
         raise RuntimeError(f"No download URL from wangp_create_gallery_download: {create}")
 
-    if str(url).startswith("/"):
-        url = _mcp_origin(mcp_url) + str(url)
+    url = _rewrite_transfer_url(str(url), mcp_url)
+    logger.info("Gallery download GET %s (id=%s)", url, gallery_id)
 
     with httpx.Client(timeout=600.0, follow_redirects=True) as client:
         r = client.get(str(url))
         if r.status_code >= 400:
-            raise RuntimeError(f"Gallery download HTTP {r.status_code}: {r.text[:200]}")
+            raise RuntimeError(f"Gallery download HTTP {r.status_code}: {r.text[:200]} url={url}")
         ct = (r.headers.get("content-type") or "").lower()
         ext = ".bin"
         if "png" in ct:
@@ -479,16 +523,183 @@ def mcp_download_gallery_item(mcp_url: str, gallery_id: str, job_id: str) -> str
             ext = ".mp4"
         elif "webm" in ct:
             ext = ".webm"
-        # filename from content-disposition
         cd = r.headers.get("content-disposition") or ""
         if "filename=" in cd:
-            import re
-            m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', cd, re.I)
-            if m:
-                name = m.group(1).strip()
-                if "." in name:
-                    ext = "." + name.rsplit(".", 1)[-1].lower()[:8]
+            import re as _re
+            mm = _re.search(r'filename\*?=(?:UTF-8\'\'\')?"?([^";]+)"?', cd, re.I)
+            if mm and "." in mm.group(1):
+                ext = "." + mm.group(1).strip().rsplit(".", 1)[-1].lower()[:8]
+        if len(r.content) < 32:
+            raise RuntimeError(f"Gallery download empty body from {url}")
         return _save_bytes_result(job_id, r.content, ext)
+
+
+def _artifact_to_local_file(job_id: str, art: dict) -> str | None:
+    """Decode MCP result.artifacts / embedded media into static/results."""
+    if not isinstance(art, dict):
+        return None
+    # base64 fields common over JSON-RPC
+    for key in ("image_base64", "data", "b64", "base64", "png_base64", "jpeg_base64"):
+        val = art.get(key)
+        if isinstance(val, str) and len(val) > 100:
+            import base64
+            raw = val
+            if "," in raw and raw.strip().startswith("data:"):
+                raw = raw.split(",", 1)[1]
+            try:
+                data = base64.b64decode(raw)
+                if len(data) > 64:
+                    media = str(art.get("media_type") or art.get("type") or "image")
+                    ext = ".mp4" if "video" in media else ".png"
+                    if data[:3] == b"\xff\xd8\xff":
+                        ext = ".jpg"
+                    return _save_bytes_result(job_id, data, ext)
+            except Exception:
+                pass
+    # raw bytes as list of ints (unlikely but possible)
+    for key in ("image_bytes", "bytes", "content"):
+        val = art.get(key)
+        if isinstance(val, list) and len(val) > 64 and all(isinstance(x, int) for x in val[:20]):
+            data = bytes(val)
+            return _save_bytes_result(job_id, data, ".png")
+    return None
+
+
+def mcp_fetch_result_via_gallery(mcp_url: str, job_id: str, remote_path: str | None = None) -> str:
+    """
+    MCP-only transfer (no Gradio):
+      1) wangp_list_gallery → find item matching output filename
+      2) wangp_create_gallery_download(gallery_id) → GET bytes
+      3) wangp_get_gallery_selection as fallback
+    """
+    name = Path(str(remote_path).replace("\\", "/")).name if remote_path else None
+    stem = Path(name).stem if name else None
+
+    items = []
+    for tool, args in (
+        ("wangp_list_gallery", {}),
+        ("wangp_list_gallery", {"media_type": "image"}),
+        ("wangp_list_gallery", {"media_type": "all"}),
+        ("wangp_get_gallery_selection", {"media_type": "all"}),
+        ("wangp_get_gallery_selection", {}),
+    ):
+        try:
+            raw = mcp_call_tool(mcp_url, tool, args, timeout=45.0)
+        except Exception as e:
+            logger.debug("%s failed: %s", tool, e)
+            continue
+        batch = raw if isinstance(raw, list) else (
+            (raw or {}).get("items")
+            or (raw or {}).get("gallery")
+            or (raw or {}).get("gallery_items")
+            or (raw or {}).get("images")
+            or (raw or {}).get("videos")
+            or ([raw] if isinstance(raw, dict) and (raw.get("gallery_id") or raw.get("id") or raw.get("path")) else [])
+        )
+        if isinstance(batch, dict):
+            batch = list(batch.values())
+        if isinstance(batch, list):
+            items.extend([x for x in batch if isinstance(x, dict)])
+        if items:
+            break
+
+    if not items:
+        raise RuntimeError(
+            "wangp_list_gallery returned no items. "
+            "Outputs must appear in the MCP Gallery for download without Gradio."
+        )
+
+    def score(it: dict) -> int:
+        s = 0
+        p = str(it.get("path") or it.get("file") or it.get("filename") or "")
+        n = Path(p.replace("\\", "/")).name
+        gid = it.get("gallery_id") or it.get("id")
+        if name and n == name:
+            s += 100
+        if stem and stem in n:
+            s += 50
+        if name and name in p:
+            s += 40
+        if remote_path and remote_path.replace("\\", "/") in p.replace("\\", "/"):
+            s += 80
+        if gid:
+            s += 1
+        # prefer newest if timestamp-like fields exist
+        for k in ("created_at", "mtime", "time", "index"):
+            if it.get(k) is not None:
+                try:
+                    s += int(float(it[k])) % 1000
+                except Exception:
+                    pass
+        return s
+
+    items_sorted = sorted(items, key=score, reverse=True)
+    errors = []
+    for it in items_sorted[:8]:
+        gid = it.get("gallery_id") or it.get("id") or it.get("item_id")
+        if not gid:
+            continue
+        # skip if looks like path
+        if "/" in str(gid) or "\\" in str(gid):
+            continue
+        try:
+            return mcp_download_gallery_item(mcp_url, str(gid), job_id)
+        except Exception as e:
+            errors.append(f"{gid}: {e}")
+    raise RuntimeError(
+        "Gallery items found but download failed: " + ("; ".join(errors)[:400] if errors else "no gallery_id")
+    )
+
+
+def mcp_download_remote_file(mcp_url: str, remote_path: str, job_id: str, gradio_url: str = "") -> str:
+    """
+    Only used when Gradio URL is explicitly configured.
+    Does NOT probe random ports (avoids WinError 10061 noise when MCP-only).
+    """
+    remote_path = str(remote_path).strip().strip('"').strip("'")
+    if not remote_path:
+        raise RuntimeError("empty remote path")
+
+    if remote_path.startswith(("http://", "https://")):
+        with httpx.Client(timeout=600.0, follow_redirects=True) as client:
+            r = client.get(remote_path)
+            if r.status_code >= 400:
+                raise RuntimeError(f"Download HTTP {r.status_code}")
+            ext = Path(remote_path.split("?")[0]).suffix or ".bin"
+            return _save_bytes_result(job_id, r.content, ext)
+
+    local = Path(remote_path)
+    if local.is_file():
+        return _copy_result_into_static(local, job_id)
+
+    if not (gradio_url or "").strip():
+        raise RuntimeError("not local, gallery download needed (no Gradio URL configured)")
+
+    from urllib.parse import quote
+    o = gradio_url.rstrip("/")
+    name = Path(remote_path.replace("\\", "/")).name
+    path_variants = [remote_path, remote_path.replace("\\", "/")]
+    candidates = []
+    for pv in path_variants:
+        candidates.append(f"{o}/file={pv}")
+        candidates.append(f"{o}/gradio_api/file={pv}")
+        candidates.append(f"{o}/file={quote(pv, safe=':/\\\\')}")
+
+    last_err = None
+    with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+        for u in candidates:
+            try:
+                r = client.get(u)
+                if r.status_code == 200 and r.content and len(r.content) > 100:
+                    ct = (r.headers.get("content-type") or "").lower()
+                    if "text/html" in ct and b"<html" in r.content[:200].lower():
+                        continue
+                    ext = Path(name).suffix or ".bin"
+                    return _save_bytes_result(job_id, r.content, ext)
+                last_err = f"HTTP {r.status_code}"
+            except Exception as e:
+                last_err = str(e)
+    raise RuntimeError(f"Gradio file fetch failed last={last_err}")
 
 
 
@@ -836,15 +1047,17 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
                     break
                 except Exception as e:
                     transfer_errors.append(str(e))
-            if remote_path:
+            if remote_path and (gradio_url or "").strip():
                 try:
                     url = mcp_download_remote_file(mcp_url, str(remote_path), job_id, gradio_url=gradio_url)
                     break
                 except Exception as e:
                     transfer_errors.append(str(e))
+            elif remote_path:
+                transfer_errors.append(f"path={remote_path} (need gallery id; Gradio not configured)")
 
     # 4) Any media paths nested in result
-    if not url:
+    if not url and (gradio_url or "").strip():
         for path in _walk_file_paths(result):
             try:
                 url = mcp_download_remote_file(mcp_url, path, job_id, gradio_url=gradio_url)
