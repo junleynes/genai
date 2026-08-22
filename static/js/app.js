@@ -1,5 +1,5 @@
 /**
- * GenAI client – auth, theme, nav, helpers
+ * Opensource Generative AI client – auth, theme, nav, helpers
  */
 const TOKEN_KEY = 'genai_token';
 const USER_KEY = 'genai_user';

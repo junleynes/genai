@@ -1,5 +1,5 @@
 """
-GenAI – Modern frontend for Wan2GP
+Opensource Generative AI – Modern frontend for Wan2GP
 User/Job management • Branding • Easy & Advanced generation modes
 """
 import asyncio
@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("genai")
 
 BASE = Path(__file__).parent.parent
-app = FastAPI(title="GenAI", version="1.0.0")
+app = FastAPI(title="Opensource Generative AI", version="1.0.0")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
@@ -39,7 +39,7 @@ templates = Jinja2Templates(directory=str(BASE / "templates"))
 def api_version():
     """Use this to verify the deployed code is MCP (not Gradio mock)."""
     return {
-        "app": "GenAI",
+        "app": "Opensource Generative AI",
         "backend": BACKEND_ID,
         "built": BACKEND_BUILT,
         "mock": False,
@@ -49,7 +49,7 @@ def api_version():
 @app.on_event("startup")
 def startup():
     db.ensure_admin()
-    logger.info("GenAI ready")
+    logger.info("Opensource Generative AI ready")
 
 
 # ─── Pydantic models ──────────────────────────────────────────────────────────

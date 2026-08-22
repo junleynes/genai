@@ -1,5 +1,5 @@
 """
-GenAI job runner — remote WanGP via MCP Streamable HTTP.
+Opensource Generative AI job runner — remote WanGP via MCP Streamable HTTP.
 
 Verified against WanGP v1.10.1 / protocol 2025-03-26:
   - Endpoint MUST be http://HOST:PORT/mcp/  (trailing slash; /mcp → 307)
@@ -280,7 +280,7 @@ def mcp_ensure_session(mcp_url: str, timeout: float = 30.0) -> str | None:
         {
             "protocolVersion": "2025-03-26",
             "capabilities": {},
-            "clientInfo": {"name": "GenAI", "version": "1.1.0"},
+            "clientInfo": {"name": "Opensource Generative AI", "version": "1.1.0"},
         },
         timeout=timeout,
         session_id=None,

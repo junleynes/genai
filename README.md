@@ -1,4 +1,4 @@
-# GenAI
+# Opensource Generative AI
 
 Modern web frontend for **Wan2GP** (WanGP) – user & job management, branding, Easy/Advanced generation modes, light/dark theme, remote MCP integration.
 

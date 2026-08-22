@@ -1,1 +1,1 @@
-# GenAI application package
+# Opensource Generative AI application package
