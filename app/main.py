@@ -306,8 +306,8 @@ async def retry_job(
         raise HTTPException(404, "Job not found")
     if user["role"] != "admin" and job["user_id"] != user["id"]:
         raise HTTPException(403, "Not your job")
-    if job.get("status") not in ("failed", "completed"):
-        raise HTTPException(400, "Only failed (or completed) jobs can be retried")
+    if job.get("status") not in ("failed", "completed", "cancelled", "canceled"):
+        raise HTTPException(400, "Only failed, cancelled, or completed jobs can be retried")
 
     db.update_job(job_id, {
         "status": "queued",

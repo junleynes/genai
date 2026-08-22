@@ -1112,6 +1112,100 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
 
 
 
+
+def _extract_progress_pct(st: dict) -> int | None:
+    """Best-effort progress 0-100 from wangp_get_job payloads."""
+    if not isinstance(st, dict):
+        return None
+
+    def from_ratio(val) -> int | None:
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            return None
+        if v < 0:
+            return None
+        if v <= 1.0:
+            return int(round(v * 100))
+        if v <= 100:
+            return int(round(v))
+        return min(100, int(round(v)))
+
+    # direct fields
+    for key in ("progress", "percent", "percentage", "pct", "ratio"):
+        if key in st and st[key] is not None:
+            p = from_ratio(st[key])
+            if p is not None:
+                return p
+
+    status = st.get("status")
+    if isinstance(status, dict):
+        for key in ("progress", "percent", "percentage"):
+            if key in status and status[key] is not None:
+                p = from_ratio(status[key])
+                if p is not None:
+                    return p
+        cur = status.get("current_step") or status.get("step")
+        tot = status.get("total_steps") or status.get("steps")
+        if cur is not None and tot:
+            try:
+                return max(0, min(100, int(100 * float(cur) / float(tot))))
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
+    elif isinstance(status, str):
+        # e.g. "45%" or "step 3/10"
+        import re as _re
+        m = _re.search(r"(\d{1,3})\s*%", status)
+        if m:
+            return max(0, min(100, int(m.group(1))))
+        m = _re.search(r"(\d+)\s*/\s*(\d+)", status)
+        if m:
+            try:
+                return max(0, min(100, int(100 * int(m.group(1)) / int(m.group(2)))))
+            except ZeroDivisionError:
+                pass
+
+    # step fields at top level
+    cur = st.get("current_step") or st.get("step")
+    tot = st.get("total_steps") or st.get("num_inference_steps") or st.get("steps")
+    if cur is not None and tot:
+        try:
+            return max(0, min(100, int(100 * float(cur) / float(tot))))
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+
+    # events list (newest last)
+    events = st.get("events") or st.get("event_log") or []
+    if isinstance(events, list):
+        for ev in reversed(events):
+            if not isinstance(ev, dict):
+                continue
+            data = ev.get("data") if isinstance(ev.get("data"), dict) else ev
+            if not isinstance(data, dict):
+                continue
+            for key in ("progress", "percent", "percentage"):
+                if data.get(key) is not None:
+                    p = from_ratio(data[key])
+                    if p is not None:
+                        return p
+            cur = data.get("current_step") or data.get("step")
+            tot = data.get("total_steps") or data.get("steps")
+            if cur is not None and tot:
+                try:
+                    return max(0, min(100, int(100 * float(cur) / float(tot))))
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+
+    phase = st.get("phase")
+    if isinstance(phase, (int, float)) and st.get("total_phases"):
+        try:
+            return max(0, min(100, int(100 * float(phase) / float(st["total_phases"]))))
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+
+    return None
+
+
 def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
     mcp_url = (settings_cfg.get("wan2gp_mcp_url") or "").strip()
     if not mcp_url:
@@ -1192,12 +1286,9 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
             time.sleep(2)
             continue
 
-        prog = st.get("progress")
-        if prog is None and isinstance(st.get("status"), dict):
-            prog = st["status"].get("progress")
-        if isinstance(prog, (int, float)):
-            pct = int(prog * 100) if float(prog) <= 1 else int(prog)
-            db.update_job(job_id, {"progress": max(20, min(95, pct))})
+        pct = _extract_progress_pct(st)
+        if pct is not None:
+            db.update_job(job_id, {"progress": max(5, min(95, int(pct)))})
 
         done = st.get("done") or st.get("finished") or st.get("complete")
         status = str(st.get("status") or st.get("state") or "").lower()

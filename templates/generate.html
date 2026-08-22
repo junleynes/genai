@@ -174,12 +174,7 @@ function fillModelSelect(models) {
   let list = models || [];
   if (family) {
     const f = family.toLowerCase();
-    list = list.filter(m => {
-      const fam = String(m.family || '').toLowerCase();
-      const mt = String(m.model_type || '').toLowerCase();
-      const nm = String(m.name || '').toLowerCase();
-      return fam === f || fam.includes(f) || mt.includes(f) || nm.includes(f);
-    });
+    list = list.filter(m => inferFamily(m).toLowerCase() === f || inferFamily(m).toLowerCase().includes(f));
   }
   sel.innerHTML = '';
   const optAuto = document.createElement('option');
@@ -206,13 +201,35 @@ function fillModelSelect(models) {
   }
 }
 
+function inferFamily(m) {
+  if (m.family && String(m.family).trim()) return String(m.family).trim();
+  const mt = String(m.model_type || '').toLowerCase();
+  const nm = String(m.name || '').toLowerCase();
+  const blob = mt + ' ' + nm;
+  const rules = [
+    ['ltx', 'LTX'], ['ltx2', 'LTX'],
+    ['wan2', 'Wan'], ['wan_', 'Wan'], ['wan2.', 'Wan'],
+    ['flux', 'Flux'], ['hunyuan', 'Hunyuan'],
+    ['qwen', 'Qwen'], ['krea', 'Krea'],
+    ['vace', 'VACE'], ['multitalk', 'Multitalk'],
+    ['z-image', 'Z-Image'], ['zimage', 'Z-Image'],
+    ['tts', 'TTS'], ['music', 'Music'],
+  ];
+  for (const [key, label] of rules) {
+    if (blob.includes(key)) return label;
+  }
+  // first token of model_type before _ or -
+  const token = String(m.model_type || '').split(/[_\-]/)[0];
+  return token ? token : 'Other';
+}
+
 function rebuildFamilyOptions(models) {
   const familySel = document.getElementById('model-family');
   if (!familySel) return;
   const prev = familySel.value;
   const families = new Set();
   for (const m of models || []) {
-    if (m.family) families.add(String(m.family));
+    families.add(inferFamily(m));
   }
   familySel.innerHTML = '<option value="">All families</option>';
   [...families].sort((a, b) => a.localeCompare(b)).forEach(f => {
@@ -223,6 +240,7 @@ function rebuildFamilyOptions(models) {
   });
   if (prev && [...familySel.options].some(o => o.value === prev)) familySel.value = prev;
 }
+
 
 async function loadModels() {
   const sel = document.getElementById('model-select');
@@ -361,5 +379,9 @@ document.getElementById('gen-form').addEventListener('submit', async (e) => {
 
 updateUI();
 loadModels();
+document.getElementById('model-family')?.addEventListener('change', () => {
+  fillModelSelect(allModelsCache);
+});
+document.getElementById('model-refresh')?.addEventListener('click', () => loadModels());
 </script>
 {% endblock %}
