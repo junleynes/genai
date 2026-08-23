@@ -26,7 +26,7 @@ logger = logging.getLogger("genai.generation")
 
 # Deployed-code fingerprint — GET /api/version must show this
 BACKEND_ID = "mcp-streamable-http-v2-no-mock"
-BACKEND_BUILT = "2026-08-23-outputs-http"
+BACKEND_BUILT = "2026-08-23-mcp-inline-media-transfer"
 
 UPLOAD_DIR = Path(__file__).parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -199,8 +199,19 @@ def _parse_mcp_tool_result(data: dict) -> Any:
             else:
                 texts.append(str(item))
         raise RuntimeError("; ".join(texts) or "MCP tool isError")
+    # Collect binary content blocks (image/audio/embedded resource) BEFORE
+    # falling back to text-only parsing. MCP servers commonly return generated
+    # media as {"type":"image","data":"<b64>","mimeType":"image/png"} — the old
+    # code dropped these on the floor.
+    media_blocks = _collect_media_blocks(result.get("content"))
+
     if result.get("structuredContent") is not None:
-        return result["structuredContent"]
+        sc = result["structuredContent"]
+        if media_blocks and isinstance(sc, dict):
+            sc = dict(sc)
+            sc.setdefault("_mcp_media", media_blocks)
+        return sc
+
     content = result.get("content")
     if isinstance(content, list) and content:
         texts = []
@@ -211,11 +222,105 @@ def _parse_mcp_tool_result(data: dict) -> Any:
                 texts.append(item)
         joined = "\n".join(texts).strip()
         if joined:
+            parsed: Any
             try:
-                return json.loads(joined)
+                parsed = json.loads(joined)
             except Exception:
-                return {"text": joined}
+                parsed = {"text": joined}
+            if media_blocks and isinstance(parsed, dict):
+                parsed = dict(parsed)
+                parsed.setdefault("_mcp_media", media_blocks)
+            return parsed
+
+    if media_blocks:
+        out = dict(result)
+        out["_mcp_media"] = media_blocks
+        return out
     return result
+
+
+def _collect_media_blocks(content: Any) -> list[dict]:
+    """Pull base64 media out of MCP content blocks, at any nesting depth."""
+    found: list[dict] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        ntype = str(node.get("type") or "").lower()
+        if ntype in ("image", "audio", "video") and isinstance(node.get("data"), str):
+            found.append({
+                "data": node["data"],
+                "mime": node.get("mimeType") or node.get("mime_type") or "",
+            })
+            return
+        if ntype == "resource" or "resource" in node:
+            res = node.get("resource") if isinstance(node.get("resource"), dict) else node
+            blob = res.get("blob") if isinstance(res, dict) else None
+            if isinstance(blob, str) and len(blob) > 64:
+                found.append({
+                    "data": blob,
+                    "mime": res.get("mimeType") or res.get("mime_type") or "",
+                    "uri": res.get("uri") or "",
+                })
+                return
+        for value in node.values():
+            if isinstance(value, (dict, list)):
+                walk(value)
+
+    walk(content)
+    return found
+
+
+def _ext_from_mime(mime: str, fallback: str = ".png") -> str:
+    m = (mime or "").lower()
+    table = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+        "video/mp4": ".mp4",
+        "video/webm": ".webm",
+        "audio/mpeg": ".mp3",
+        "audio/wav": ".wav",
+    }
+    for key, ext in table.items():
+        if key in m:
+            return ext
+    return fallback
+
+
+def _media_blocks_to_local(job_id: str, obj: Any) -> str | None:
+    """Decode any MCP media blocks found anywhere in a payload into static/results."""
+    import base64
+
+    blocks: list[dict] = []
+    if isinstance(obj, dict) and isinstance(obj.get("_mcp_media"), list):
+        blocks.extend([b for b in obj["_mcp_media"] if isinstance(b, dict)])
+    blocks.extend(_collect_media_blocks(obj))
+
+    for block in blocks:
+        raw = block.get("data")
+        if not isinstance(raw, str) or len(raw) < 64:
+            continue
+        if raw.strip().startswith("data:") and "," in raw:
+            raw = raw.split(",", 1)[1]
+        try:
+            data = base64.b64decode(raw, validate=False)
+        except Exception:
+            continue
+        if len(data) < 64:
+            continue
+        ext = _ext_from_mime(str(block.get("mime") or ""))
+        uri = str(block.get("uri") or "")
+        if uri and "." in uri.rsplit("/", 1)[-1]:
+            ext = "." + uri.rsplit(".", 1)[-1].lower()[:8]
+        return _save_bytes_result(job_id, data, ext)
+    return None
 
 
 def mcp_raw_request(
@@ -592,6 +697,227 @@ def _normalize_gallery_items(raw) -> list[dict]:
     if not out and any(k in raw for k in ("gallery_id", "path", "filename")):
         out.append(raw)
     return out
+
+
+_mcp_tool_cache: dict[str, list[dict]] = {}
+
+
+def mcp_discover_tools(mcp_url: str, force: bool = False) -> list[dict]:
+    """Cached tools/list returning full tool dicts (name + inputSchema)."""
+    endpoint = _mcp_endpoint(mcp_url)
+    if not force and endpoint in _mcp_tool_cache:
+        return _mcp_tool_cache[endpoint]
+    tools: list[dict] = []
+    try:
+        data, _ = mcp_raw_request(mcp_url, "tools/list", {}, timeout=20.0)
+        if isinstance(data, dict):
+            result = data.get("result") or data
+            raw = result.get("tools") if isinstance(result, dict) else None
+            for tool in raw or []:
+                if isinstance(tool, dict) and tool.get("name"):
+                    tools.append(tool)
+    except Exception as e:
+        logger.warning("tools/list discovery failed: %s", e)
+    _mcp_tool_cache[endpoint] = tools
+    if tools:
+        logger.info("MCP tools discovered: %s", ", ".join(t.get("name", "") for t in tools))
+    return tools
+
+
+def _tool_param_names(tool: dict) -> list[str]:
+    schema = tool.get("inputSchema") or tool.get("input_schema") or {}
+    props = schema.get("properties") if isinstance(schema, dict) else None
+    return list(props.keys()) if isinstance(props, dict) else []
+
+
+def _find_tools(mcp_url: str, include: tuple[str, ...], exclude: tuple[str, ...] = ()) -> list[dict]:
+    out = []
+    for tool in mcp_discover_tools(mcp_url):
+        name = str(tool.get("name") or "").lower()
+        if any(word in name for word in include) and not any(word in name for word in exclude):
+            out.append(tool)
+    return out
+
+
+def mcp_register_path_and_download(mcp_url: str, remote_path: str, job_id: str) -> str:
+    """
+    Ask the server to register/import an on-disk output into its gallery, then
+    download it by the returned id. Tool names vary between WanGP builds, so we
+    discover candidates instead of hardcoding.
+    """
+    if not remote_path:
+        raise RuntimeError("no remote path to register")
+
+    candidates = _find_tools(
+        mcp_url,
+        include=("gallery", "output", "file", "media", "import", "register", "scan"),
+        exclude=("upload", "delete", "remove", "clear"),
+    )
+    # Prefer tools that look like they take a path and produce/refresh gallery state
+    def rank(tool: dict) -> int:
+        name = str(tool.get("name") or "").lower()
+        params = [p.lower() for p in _tool_param_names(tool)]
+        score = 0
+        if any(w in name for w in ("register", "import", "add", "scan", "refresh", "index")):
+            score += 50
+        if any(p in params for p in ("path", "file", "filename", "filepath", "file_path", "src")):
+            score += 40
+        if "gallery" in name:
+            score += 20
+        if any(w in name for w in ("get", "read", "fetch", "download")):
+            score += 10
+        return score
+
+    ranked = [t for t in sorted(candidates, key=rank, reverse=True) if rank(t) >= 40]
+    if not ranked:
+        raise RuntimeError("no path-registration tool found on server")
+
+    name_only = Path(str(remote_path).replace("\\", "/")).name
+    errors: list[str] = []
+    for tool in ranked[:6]:
+        tname = str(tool.get("name"))
+        params = [p.lower() for p in _tool_param_names(tool)]
+        keys = [p for p in ("path", "file_path", "filepath", "file", "filename", "src")
+                if p in params] or ["path"]
+        for key in keys:
+            for value in (remote_path, str(remote_path).replace("\\", "/"), name_only):
+                try:
+                    out = mcp_call_tool(mcp_url, tname, {key: value}, timeout=60.0)
+                except Exception as e:
+                    errors.append(f"{tname}({key}): {e}")
+                    continue
+                # The call may return the bytes directly...
+                got = _media_blocks_to_local(job_id, out)
+                if got:
+                    logger.info("Registered+received media via %s", tname)
+                    return got
+                # ...or a gallery id we can then download.
+                gid = _extract_gallery_id(out) if out is not None else None
+                if not gid:
+                    for cand in _walk_gallery_ids(out if isinstance(out, (dict, list)) else {}):
+                        gid = cand
+                        break
+                if gid:
+                    try:
+                        url = mcp_download_gallery_item(mcp_url, str(gid), job_id)
+                        logger.info("Registered %s via %s → gallery %s", name_only, tname, gid)
+                        return url
+                    except Exception as e:
+                        errors.append(f"download {gid}: {e}")
+    raise RuntimeError("path registration failed: " + ("; ".join(errors)[:300] or "no usable response"))
+
+
+def mcp_read_file_resource(mcp_url: str, remote_path: str, job_id: str) -> str:
+    """
+    Try the MCP resources API (resources/read) to pull the file's bytes.
+    Many servers expose outputs as file:// resources even when no gallery exists.
+    """
+    if not remote_path:
+        raise RuntimeError("no remote path for resource read")
+
+    norm = str(remote_path).replace("\\", "/")
+    from urllib.parse import quote
+    uris = [
+        remote_path,
+        norm,
+        f"file:///{quote(norm.lstrip('/'), safe=':/')}",
+        f"file://{quote(norm, safe=':/')}",
+    ]
+
+    # If the server advertises resources, prefer a matching advertised URI.
+    try:
+        data, _ = mcp_raw_request(mcp_url, "resources/list", {}, timeout=20.0)
+        listed = []
+        if isinstance(data, dict):
+            result = data.get("result") or data
+            for res in (result.get("resources") or []) if isinstance(result, dict) else []:
+                if isinstance(res, dict) and res.get("uri"):
+                    listed.append(str(res["uri"]))
+        target = Path(norm).name.lower()
+        for uri in listed:
+            if target and target in uri.lower():
+                uris.insert(0, uri)
+    except Exception:
+        pass
+
+    errors = []
+    for uri in uris:
+        try:
+            data, _ = mcp_raw_request(mcp_url, "resources/read", {"uri": uri}, timeout=90.0)
+        except Exception as e:
+            errors.append(str(e))
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("error"):
+            errors.append(str(data["error"])[:120])
+            continue
+        result = data.get("result") or data
+        got = _media_blocks_to_local(job_id, result)
+        if got:
+            logger.info("Fetched result via resources/read %s", uri)
+            return got
+        # contents[].blob / .text
+        contents = result.get("contents") if isinstance(result, dict) else None
+        for item in contents or []:
+            if not isinstance(item, dict):
+                continue
+            blob = item.get("blob")
+            if isinstance(blob, str) and len(blob) > 64:
+                import base64
+                try:
+                    raw = base64.b64decode(blob, validate=False)
+                except Exception:
+                    continue
+                if len(raw) > 64:
+                    ext = _ext_from_mime(
+                        str(item.get("mimeType") or ""),
+                        Path(norm).suffix or ".png",
+                    )
+                    return _save_bytes_result(job_id, raw, ext)
+    raise RuntimeError("resources/read failed: " + ("; ".join(errors)[:250] or "no blob returned"))
+
+
+def mcp_download_via_origin_guess(mcp_url: str, remote_path: str, job_id: str) -> str:
+    """
+    Last resort needing zero configuration: the MCP server already serves HTTP
+    (gallery uploads PUT to its origin), so probe common static routes for the
+    output filename on that same origin.
+    """
+    if not remote_path:
+        raise RuntimeError("no remote path to probe")
+    origin = _mcp_origin(mcp_url)
+    if not origin:
+        raise RuntimeError("no MCP origin")
+
+    from urllib.parse import quote
+    name = Path(str(remote_path).replace("\\", "/")).name
+    if not name:
+        raise RuntimeError("no filename")
+    enc = quote(name)
+    routes = [
+        f"/outputs/{enc}", f"/output/{enc}", f"/files/{enc}", f"/file/{enc}",
+        f"/gallery/{enc}", f"/media/{enc}", f"/static/outputs/{enc}",
+        f"/download/{enc}", f"/results/{enc}",
+    ]
+    last_err = None
+    with httpx.Client(timeout=120.0, follow_redirects=True) as client:
+        for route in routes:
+            url = origin.rstrip("/") + route
+            try:
+                r = client.get(url)
+            except Exception as e:
+                last_err = str(e)
+                continue
+            if r.status_code == 200 and r.content and len(r.content) > 64:
+                ct = (r.headers.get("content-type") or "").lower()
+                if "text/html" in ct and b"<html" in r.content[:200].lower():
+                    last_err = f"HTML at {url}"
+                    continue
+                logger.info("Fetched result from MCP origin route %s", route)
+                return _save_bytes_result(job_id, r.content, Path(name).suffix or ".bin")
+            last_err = f"HTTP {r.status_code} {route}"
+    raise RuntimeError(f"origin probe failed: {last_err}")
 
 
 def mcp_list_tool_names(mcp_url: str) -> list[str]:
@@ -984,14 +1310,17 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
                     break
                 except Exception as e:
                     transfer_errors.append(str(e))
-            if remote_path and (gradio_url or "").strip():
+            # NOTE: previously this branch required gradio_url to be set, which
+            # meant an http:// URL or a locally-visible/mounted path was never
+            # even attempted. mcp_download_remote_file handles both by itself.
+            if remote_path:
                 try:
-                    url = mcp_download_remote_file(mcp_url, str(remote_path), job_id, gradio_url=gradio_url)
+                    url = mcp_download_remote_file(
+                        mcp_url, str(remote_path), job_id, gradio_url=gradio_url
+                    )
                     break
                 except Exception as e:
                     transfer_errors.append(str(e))
-            elif remote_path:
-                transfer_errors.append(f"path={remote_path} (need gallery id; Gradio not configured)")
 
     # 4) Any media paths nested in result
     if not url and (gradio_url or "").strip():
@@ -1001,6 +1330,42 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
                 break
             except Exception as e:
                 transfer_errors.append(str(e))
+
+    # 4b) Inline MCP media blocks (image/audio/resource) anywhere in the payload.
+    # Cheapest possible path: the bytes are already in the response.
+    if not url:
+        try:
+            url = _media_blocks_to_local(job_id, result)
+            if url:
+                logger.info("Job %s: result arrived inline over MCP", job_id)
+        except Exception as e:
+            transfer_errors.append(f"inline media: {e}")
+
+    # 4c) Ask the server to register the on-disk output, then download it.
+    if not url and mcp_url:
+        paths = _walk_file_paths(result)
+        hint = paths[0] if paths else None
+        if not hint:
+            for f in (files if isinstance(files, list) else []):
+                if isinstance(f, str):
+                    hint = f
+                    break
+                if isinstance(f, dict) and (f.get("path") or f.get("file")):
+                    hint = f.get("path") or f.get("file")
+                    break
+        if hint:
+            for strategy, fn in (
+                ("resources/read", mcp_read_file_resource),
+                ("register_path", mcp_register_path_and_download),
+                ("origin_probe", mcp_download_via_origin_guess),
+            ):
+                try:
+                    url = fn(mcp_url, str(hint), job_id)
+                    if url:
+                        logger.info("Job %s transferred via %s", job_id, strategy)
+                        break
+                except Exception as e:
+                    transfer_errors.append(f"{strategy}: {e}")
 
     # 5) Artifacts (return_media / embedded base64)
     if not url:
@@ -1050,11 +1415,17 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
             logger.warning("outputs http transfer failed: %s", e)
 
     if not url:
+        tool_names = []
+        try:
+            tool_names = [str(t.get("name")) for t in mcp_discover_tools(mcp_url)] if mcp_url else []
+        except Exception:
+            pass
         msg = (
-            "Generation finished on remote WanGP, but the file could not be transferred over MCP. "
-            "No Gradio is required — the file must be available via Gallery download "
-            "(wangp_list_gallery + wangp_create_gallery_download). "
-            + ("; ".join(transfer_errors)[:450] if transfer_errors else "")
+            "Generation finished on remote WanGP, but the file could not be transferred. "
+            "Tried: inline media, gallery download, resources/read, path registration, "
+            "origin probe, outputs HTTP. "
+            + (f"server_tools=[{', '.join(tool_names)[:300]}] " if tool_names else "")
+            + ("errors=" + "; ".join(transfer_errors)[:400] if transfer_errors else "")
         )
         db.update_job(job_id, {"error": msg[:800], "status": "failed", "progress": 0})
         return False
@@ -1192,17 +1563,45 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
 
     logger.info("MCP wangp_generate → %s model=%s", _mcp_endpoint(mcp_url), source.get("model_type"))
 
+    gen_args: dict = {"source": source, "wait": False, "event_limit": 20}
+    # If the server advertises a "return the bytes inline" flag, use it — that
+    # removes the file-transfer problem entirely.
+    inline_flags = {}
+    for tool in mcp_discover_tools(mcp_url):
+        if str(tool.get("name")) != "wangp_generate":
+            continue
+        for param in _tool_param_names(tool):
+            if param.lower() in (
+                "return_media", "include_media", "return_files", "return_bytes",
+                "include_bytes", "return_images", "inline_media", "embed_media",
+            ):
+                inline_flags[param] = True
+        break
+    if inline_flags:
+        logger.info("wangp_generate supports inline media: %s", list(inline_flags))
+        gen_args.update(inline_flags)
+
     try:
-        out = mcp_call_tool(
-            mcp_url,
-            "wangp_generate",
-            {"source": source, "wait": False, "event_limit": 20},
-            timeout=90.0,
-        )
+        out = mcp_call_tool(mcp_url, "wangp_generate", gen_args, timeout=90.0)
     except Exception as e:
-        logger.exception("wangp_generate failed")
-        db.update_job(job_id, {"error": f"wangp_generate: {e}"[:800]})
-        return False
+        if inline_flags:
+            # Flag rejected despite being advertised — retry without it.
+            logger.warning("wangp_generate with inline flags failed (%s); retrying plain", e)
+            try:
+                out = mcp_call_tool(
+                    mcp_url,
+                    "wangp_generate",
+                    {"source": source, "wait": False, "event_limit": 20},
+                    timeout=90.0,
+                )
+            except Exception as e2:
+                logger.exception("wangp_generate failed")
+                db.update_job(job_id, {"error": f"wangp_generate: {e2}"[:800]})
+                return False
+        else:
+            logger.exception("wangp_generate failed")
+            db.update_job(job_id, {"error": f"wangp_generate: {e}"[:800]})
+            return False
 
     remote_id = None
     if isinstance(out, dict):
