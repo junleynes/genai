@@ -45,6 +45,17 @@
     </div>
 
     <div>
+      <label class="block text-sm font-medium mb-1.5">Control guide letters (advanced)</label>
+      <input id="wan2gp_control_letters" value="{{ settings.wan2gp_control_letters or '' }}" placeholder="pose=P,depth=D,canny=E"
+        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
+      <p class="text-xs text-slate-400 mt-1">
+        Pose/depth guides are sent as letters in <code>video_prompt_type</code>. The alphabet has
+        changed between WanGP releases — override here if pose control picks the wrong preprocessor.
+        Leave blank for defaults.
+      </p>
+    </div>
+
+    <div>
       <label class="block text-sm font-medium mb-1.5">Shared input folder — WanGP-side path</label>
       <input id="wan2gp_input_remote_prefix" value="{{ settings.wan2gp_input_remote_prefix or '' }}" placeholder="C:\AI-Tools\Wan2GP\inputs"
         class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
@@ -167,6 +178,7 @@ function payload() {
     wan2gp_outputs_http_base: document.getElementById('wan2gp_outputs_http_base').value.trim(),
     wan2gp_input_dir: document.getElementById('wan2gp_input_dir').value.trim(),
     wan2gp_input_remote_prefix: document.getElementById('wan2gp_input_remote_prefix').value.trim(),
+    wan2gp_control_letters: document.getElementById('wan2gp_control_letters').value.trim(),
   };
 }
 

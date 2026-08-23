@@ -4,151 +4,81 @@
 <div class="max-w-4xl mx-auto px-4 py-10">
   <div class="mb-8">
     <h1 class="text-3xl font-bold tracking-tight">Create</h1>
-    <p class="text-slate-500 dark:text-slate-400 mt-1">Easy mode for quick results, Advanced for full control. Upload media when needed.</p>
+    <p id="page-sub" class="text-slate-500 dark:text-slate-400 mt-1">Pick what you want to make.</p>
   </div>
 
-  <div id="type-tabs" role="radiogroup" aria-label="Generation type"
-       class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8">
-
-    <button type="button" data-type="t2v" role="radio" aria-checked="true"
-      class="type-btn active group relative text-left rounded-2xl border p-3 transition overflow-hidden">
-      <div class="type-stage">
-        <svg viewBox="0 0 120 56" class="w-full h-full" aria-hidden="true">
-          <g class="tk-src">
-            <rect x="6" y="16" width="30" height="3.5" rx="1.75"/>
-            <rect x="6" y="24" width="24" height="3.5" rx="1.75"/>
-            <rect x="6" y="32" width="28" height="3.5" rx="1.75"/>
-          </g>
-          <path class="tk-arrow" d="M44 28 h14 m-4 -4 l4 4 l-4 4"/>
-          <g class="tk-frames">
-            <rect class="tk-f1" x="66" y="14" width="24" height="28" rx="3"/>
-            <rect class="tk-f2" x="74" y="14" width="24" height="28" rx="3"/>
-            <rect class="tk-f3" x="82" y="14" width="24" height="28" rx="3"/>
-          </g>
-        </svg>
-      </div>
-      <p class="type-title">Text → Video</p>
-      <p class="type-sub">Describe a scene, get motion</p>
+  <div id="type-tabs" role="radiogroup" aria-label="Generation type">
+    <button type="button" data-type="t2v" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" aria-label="Text to Video. Generate videos from text prompts">
+      <img class="type-art" src="/static/img/cards/t2v.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
     </button>
-
-    <button type="button" data-type="i2v" role="radio" aria-checked="false"
-      class="type-btn group relative text-left rounded-2xl border p-3 transition overflow-hidden">
-      <div class="type-stage">
-        <svg viewBox="0 0 120 56" class="w-full h-full" aria-hidden="true">
-          <g class="tk-src">
-            <rect x="10" y="14" width="28" height="28" rx="3" fill="none" stroke-width="2"/>
-            <circle cx="19" cy="23" r="3"/>
-            <path d="M12 38 l8 -9 l6 6 l5 -5 l7 8 z"/>
-          </g>
-          <path class="tk-arrow" d="M46 28 h14 m-4 -4 l4 4 l-4 4"/>
-          <g class="tk-frames">
-            <rect class="tk-f1" x="68" y="14" width="24" height="28" rx="3"/>
-            <rect class="tk-f2" x="76" y="14" width="24" height="28" rx="3"/>
-            <rect class="tk-f3" x="84" y="14" width="24" height="28" rx="3"/>
-          </g>
-        </svg>
-      </div>
-      <p class="type-title">Image → Video</p>
-      <p class="type-sub">Animate a still frame</p>
+    <button type="button" data-type="i2v" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" aria-label="Image to Video. Animate still images into videos">
+      <img class="type-art" src="/static/img/cards/i2v.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
     </button>
-
-    <button type="button" data-type="ia2v" role="radio" aria-checked="false"
-      class="type-btn group relative text-left rounded-2xl border p-3 transition overflow-hidden">
-      <div class="type-stage">
-        <svg viewBox="0 0 120 56" class="w-full h-full" aria-hidden="true">
-          <g class="tk-src">
-            <rect x="6" y="8" width="24" height="22" rx="3" fill="none" stroke-width="2"/>
-            <circle cx="13" cy="15" r="2.5"/>
-            <path d="M8 27 l6 -7 l5 5 l4 -4 l6 6 z"/>
-            <g class="tk-wave">
-              <rect x="7"  y="40" width="3" height="6"  rx="1.5"/>
-              <rect x="12" y="36" width="3" height="14" rx="1.5"/>
-              <rect x="17" y="38" width="3" height="10" rx="1.5"/>
-              <rect x="22" y="34" width="3" height="18" rx="1.5"/>
-              <rect x="27" y="39" width="3" height="8"  rx="1.5"/>
-            </g>
-          </g>
-          <path class="tk-arrow" d="M42 28 h14 m-4 -4 l4 4 l-4 4"/>
-          <g class="tk-frames">
-            <rect class="tk-f1" x="64" y="14" width="24" height="28" rx="3"/>
-            <rect class="tk-f2" x="72" y="14" width="24" height="28" rx="3"/>
-            <rect class="tk-f3" x="80" y="14" width="24" height="28" rx="3"/>
-          </g>
-        </svg>
-      </div>
-      <p class="type-title">Image + Audio → Video</p>
-      <p class="type-sub">Drive motion with sound</p>
+    <button type="button" data-type="ia2v" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" aria-label="Image plus Audio to Video. Combine audio and images to create videos">
+      <img class="type-art" src="/static/img/cards/ia2v.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
     </button>
-
-    <button type="button" data-type="v2v" role="radio" aria-checked="false"
-      class="type-btn group relative text-left rounded-2xl border p-3 transition overflow-hidden">
-      <div class="type-stage">
-        <svg viewBox="0 0 120 56" class="w-full h-full" aria-hidden="true">
-          <g class="tk-src">
-            <rect x="4"  y="16" width="20" height="24" rx="3" fill="none" stroke-width="2"/>
-            <rect x="12" y="16" width="20" height="24" rx="3" fill="none" stroke-width="2"/>
-            <rect x="20" y="16" width="20" height="24" rx="3" fill="none" stroke-width="2"/>
-          </g>
-          <path class="tk-arrow" d="M48 28 h14 m-4 -4 l4 4 l-4 4"/>
-          <g class="tk-frames">
-            <rect class="tk-f1" x="70" y="16" width="20" height="24" rx="3"/>
-            <rect class="tk-f2" x="78" y="16" width="20" height="24" rx="3"/>
-            <rect class="tk-f3" x="86" y="16" width="20" height="24" rx="3"/>
-          </g>
-        </svg>
-      </div>
-      <p class="type-title">Video → Video</p>
-      <p class="type-sub">Restyle existing footage</p>
+    <button type="button" data-type="v2v" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" aria-label="Video to Video. Restyle and transform existing footage">
+      <img class="type-art" src="/static/img/cards/v2v.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
     </button>
-
-    <button type="button" data-type="t2i" role="radio" aria-checked="false"
-      class="type-btn group relative text-left rounded-2xl border p-3 transition overflow-hidden">
-      <div class="type-stage">
-        <svg viewBox="0 0 120 56" class="w-full h-full" aria-hidden="true">
-          <g class="tk-src">
-            <rect x="8"  y="16" width="30" height="3.5" rx="1.75"/>
-            <rect x="8"  y="24" width="22" height="3.5" rx="1.75"/>
-            <rect x="8"  y="32" width="27" height="3.5" rx="1.75"/>
-          </g>
-          <path class="tk-arrow" d="M46 28 h14 m-4 -4 l4 4 l-4 4"/>
-          <g class="tk-still">
-            <rect x="70" y="12" width="34" height="32" rx="3"/>
-            <circle class="tk-sun" cx="80" cy="22" r="3.5"/>
-            <path class="tk-hill" d="M72 40 l9 -11 l7 7 l6 -6 l8 10 z"/>
-          </g>
-        </svg>
-      </div>
-      <p class="type-title">Text → Image</p>
-      <p class="type-sub">Describe it, render one frame</p>
+    <button type="button" data-type="p2v" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" aria-label="Pose Driven to Video. Animate characters using pose data">
+      <img class="type-art" src="/static/img/cards/p2v.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
     </button>
-
-    <button type="button" data-type="i2i" role="radio" aria-checked="false"
-      class="type-btn group relative text-left rounded-2xl border p-3 transition overflow-hidden">
-      <div class="type-stage">
-        <svg viewBox="0 0 120 56" class="w-full h-full" aria-hidden="true">
-          <g class="tk-src">
-            <rect x="8" y="14" width="30" height="28" rx="3" fill="none" stroke-width="2"/>
-            <circle cx="17" cy="23" r="3"/>
-            <path d="M10 38 l9 -10 l6 6 l5 -5 l8 9 z"/>
-          </g>
-          <path class="tk-arrow" d="M46 28 h14 m-4 -4 l4 4 l-4 4"/>
-          <g class="tk-still">
-            <rect x="70" y="14" width="30" height="28" rx="3"/>
-            <circle class="tk-sun" cx="79" cy="23" r="3"/>
-            <path class="tk-hill" d="M72 38 l9 -10 l6 6 l5 -5 l8 9 z"/>
-          </g>
-        </svg>
-      </div>
-      <p class="type-title">Image → Image</p>
-      <p class="type-sub">Re-imagine a reference</p>
+    <button type="button" data-type="t2i" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" aria-label="Text to Image. Generate images from text descriptions">
+      <img class="type-art" src="/static/img/cards/t2i.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+    <button type="button" data-type="i2i" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" aria-label="Image to Image. Transform images with new styles and variations">
+      <img class="type-art" src="/static/img/cards/i2i.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
     </button>
   </div>
 
+  <div id="step-two" hidden>
   <div class="flex items-center gap-3 mb-8">
     <span class="text-sm font-medium text-slate-600 dark:text-slate-400">Mode</span>
     <div class="inline-flex p-1 rounded-xl bg-slate-200/80 dark:bg-slate-800">
-      <button id="mode-easy" class="mode-btn active px-4 py-1.5 rounded-lg text-sm font-medium transition">Easy</button>
-      <button id="mode-advanced" class="mode-btn px-4 py-1.5 rounded-lg text-sm font-medium transition">Advanced</button>
+      <button type="button" id="mode-easy" class="mode-btn active px-4 py-1.5 rounded-lg text-sm font-medium transition">Easy</button>
+      <button type="button" id="mode-advanced" class="mode-btn px-4 py-1.5 rounded-lg text-sm font-medium transition">Advanced</button>
     </div>
   </div>
 
@@ -170,8 +100,55 @@
 
 
     <div id="media-panel" class="grid sm:grid-cols-2 gap-4 hidden">
+      <div id="control-wrap" class="hidden">
+        <label class="block text-sm font-medium mb-1.5">Driving video (motion source)</label>
+        <input type="file" name="control_video" id="control-video-input" accept="video/mp4,video/webm,video/quicktime"
+          class="w-full text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-slate-200 dark:file:bg-slate-800 file:text-sm" />
+        <p class="text-xs text-slate-400 mt-1">
+          Its motion is extracted and applied to your generation; its appearance is discarded.
+        </p>
+        <button type="button" id="pick-control-library-btn"
+          class="mt-2 text-xs px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
+          🗂️ Choose from library
+        </button>
+        <div id="control-chip" class="hidden mt-2 flex items-center gap-2 p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900">
+          <span class="text-lg">🎞️</span>
+          <div class="flex-1 min-w-0">
+            <p id="control-chip-title" class="text-xs font-medium truncate"></p>
+            <p class="text-[10px] text-slate-500">Driving video from library</p>
+          </div>
+          <button type="button" onclick="clearControlSeed()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+        </div>
+
+        <div class="mt-4">
+          <label class="block text-sm font-medium mb-1.5">What to follow</label>
+          <select name="control_type" id="control-type" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm">
+            <option value="pose">Pose — body / limb positions (best for people)</option>
+            <option value="depth">Depth — 3D structure and camera move</option>
+            <option value="canny">Edges — outlines and composition</option>
+            <option value="flow">Motion flow — raw movement</option>
+            <option value="gray">Grayscale — luminance only</option>
+            <option value="raw">Raw video — no preprocessing</option>
+          </select>
+          <p class="text-xs text-slate-400 mt-1" id="control-type-hint">
+            Pose transfers a performance onto your subject without copying their appearance.
+          </p>
+        </div>
+
+        <div class="mt-4 adv-only">
+          <label class="block text-sm font-medium mb-1.5">
+            Control strength <span id="control-strength-val" class="text-slate-400 font-normal">0.9</span>
+          </label>
+          <input type="range" name="control_strength" id="control-strength"
+                 min="0.1" max="1.5" step="0.05" value="0.9" class="w-full" />
+          <p class="text-xs text-slate-400 mt-1">
+            Higher follows the driving motion more strictly; lower gives the model more freedom.
+          </p>
+        </div>
+      </div>
+
       <div id="image-wrap" class="hidden">
-        <label class="block text-sm font-medium mb-1.5">Image <span class="text-red-500">*</span></label>
+        <label class="block text-sm font-medium mb-1.5"><span id="image-label">Image</span> <span id="image-req" class="text-red-500">*</span></label>
         <input type="file" name="image" id="image-input" accept="image/png,image/jpeg,image/webp,image/jpg"
           class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
         <p class="text-xs text-slate-400 mt-1">PNG, JPG, WEBP — reference / start frame</p>
@@ -295,138 +272,87 @@
 {% block scripts %}
 <style>
   /* ── Generation type cards ─────────────────────────────────────────── */
-  /* Grid defined here rather than relying on Tailwind utilities, so the
-     selector still lays out correctly if the CDN is unreachable on the LAN. */
+  /* The artwork carries its own title and description, so the cards add no
+     text overlay — only selection affordances. */
   #type-tabs {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(1, minmax(0, 1fr));
     gap: .75rem;
+    margin-bottom: 2rem;
   }
-  @media (min-width: 640px) {
-    #type-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  }
+  @media (min-width: 560px) { #type-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (min-width: 1000px) { #type-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; } }
 
-  .type-btn {
-    border-color: #e2e8f0;
-    background: #fff;
-    --ink: #64748b;          /* diagram stroke/fill, inactive */
-    --stage: #f8fafc;        /* diagram backdrop */
-  }
-  .dark .type-btn { border-color: #334155; background: #0f172a; --ink: #94a3b8; --stage: #020617; }
-
-  .type-btn:hover { border-color: var(--brand); transform: translateY(-2px); }
-  .type-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-  .type-btn { transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
-
-  .type-btn.active {
-    border-color: transparent;
-    background: linear-gradient(135deg, var(--brand), var(--brand-secondary));
-    color: #fff;
-    --ink: #fff;
-    --stage: rgba(255,255,255,.14);
-    box-shadow: 0 8px 24px -8px var(--brand);
-  }
-
-  .type-stage {
-    height: 56px;
-    border-radius: .75rem;
-    background: var(--stage);
-    margin-bottom: .625rem;
-    overflow: hidden;
-  }
-  /* Colors set explicitly rather than inherited, so the cards stay legible
-     even if the Tailwind CDN fails to load on an offline LAN. */
-  .type-title {
-    font-size: .8125rem; font-weight: 650; line-height: 1.2; color: #0f172a;
-  }
-  .dark .type-title { color: #e2e8f0; }
-  .type-btn.active .type-title { color: #fff; }
-
-  .type-sub { font-size: .6875rem; margin-top: .125rem; color: #64748b; }
-  .dark .type-sub { color: #94a3b8; }
-  .type-btn.active .type-sub { color: rgba(255,255,255,.85); }
-
-  /* diagram primitives */
-  .type-stage {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  /* Sized here, not via utility classes: an SVG with no explicit height
-     scales to container width and gets clipped by the stage. */
-  .type-stage svg {
+  .type-card {
+    position: relative;
     display: block;
     width: 100%;
-    height: 100%;
-    color: var(--ink);
+    padding: 0;
+    border: 1px solid rgba(148,163,184,.22);
+    border-radius: 1rem;
+    overflow: hidden;
+    background: #000;
+    cursor: pointer;
+    line-height: 0;               /* no descender gap under the image */
+    transition: transform .35s cubic-bezier(.2,.8,.2,1),
+                box-shadow .35s ease, border-color .25s ease;
   }
-  .tk-src rect, .tk-src circle, .tk-src path,
-  .tk-still rect, .tk-still circle, .tk-still path { fill: currentColor; }
-  /* Outline shapes: CSS beats the fill="none" presentation attribute, so the
-     override has to be explicit or every frame renders as a solid block. */
-  .tk-src rect[fill="none"],
-  .tk-still rect[fill="none"],
-  .tk-frames rect,
-  .tk-still > rect:first-child {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
+  .type-art {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1168 / 784;     /* matches the source art, so nothing crops */
+    object-fit: cover;
+    /* Unselected cards sit back a little so the chosen one reads clearly. */
+    opacity: .72;
+    transform: scale(1.005);
+    transition: opacity .3s ease, transform .5s cubic-bezier(.2,.8,.2,1);
   }
-  .tk-arrow { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .55; }
+  .type-card:hover { transform: translateY(-4px); box-shadow: 0 18px 40px -18px rgba(0,0,0,.7); }
+  .type-card:hover .type-art { opacity: 1; transform: scale(1.03); }
+  .type-card:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
 
-  /* Motion only on the selected card, so the grid stays calm. */
-  .type-btn.active .tk-f1 { animation: tkFrame 1.8s ease-in-out infinite; }
-  .type-btn.active .tk-f2 { animation: tkFrame 1.8s ease-in-out .2s infinite; }
-  .type-btn.active .tk-f3 { animation: tkFrame 1.8s ease-in-out .4s infinite; }
-  .type-btn.active .tk-arrow { animation: tkFlow 1.8s ease-in-out infinite; }
-  .type-btn.active .tk-wave rect { animation: tkWave 1s ease-in-out infinite; transform-origin: center; }
-  .type-btn.active .tk-wave rect:nth-child(2) { animation-delay: .12s; }
-  .type-btn.active .tk-wave rect:nth-child(3) { animation-delay: .24s; }
-  .type-btn.active .tk-wave rect:nth-child(4) { animation-delay: .36s; }
-  .type-btn.active .tk-wave rect:nth-child(5) { animation-delay: .48s; }
-  .type-btn.active .tk-sun  { animation: tkPulse 2.4s ease-in-out infinite; }
-  .type-btn.active .tk-hill { animation: tkPulse 2.4s ease-in-out .3s infinite; }
+  .type-card.active {
+    border-color: transparent;
+    box-shadow: 0 0 0 2px var(--brand), 0 18px 44px -20px var(--brand);
+  }
+  .type-card.active .type-art { opacity: 1; }
 
-  /* Hover gives a single-shot preview on cards that aren't selected. */
-  .type-btn:not(.active):hover .tk-arrow { animation: tkFlow 1.2s ease-in-out; }
-  .type-btn:not(.active):hover .tk-f1 { animation: tkFrame 1.2s ease-in-out; }
-  .type-btn:not(.active):hover .tk-f2 { animation: tkFrame 1.2s ease-in-out .15s; }
-  .type-btn:not(.active):hover .tk-f3 { animation: tkFrame 1.2s ease-in-out .3s; }
+  .type-check {
+    position: absolute; top: .625rem; right: .625rem;
+    width: 24px; height: 24px; border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--brand); color: #fff;
+    opacity: 0; transform: scale(.6);
+    transition: opacity .2s ease, transform .25s cubic-bezier(.2,1.4,.4,1);
+  }
+  .type-card.active .type-check { opacity: 1; transform: scale(1); }
 
-  @keyframes tkFrame {
-    0%, 100% { opacity: .35; }
-    50%      { opacity: 1; }
-  }
-  @keyframes tkFlow {
-    0%, 100% { opacity: .35; transform: translateX(0); }
-    50%      { opacity: .9;  transform: translateX(3px); }
-  }
-  @keyframes tkWave {
-    0%, 100% { transform: scaleY(.55); }
-    50%      { transform: scaleY(1.15); }
-  }
-  @keyframes tkPulse {
-    0%, 100% { opacity: .5; }
-    50%      { opacity: 1; }
+  /* ── Step reveal ───────────────────────────────────────────────────── */
+  /* Mode toggle and the form stay hidden until a type is chosen. */
+  #step-two[hidden] { display: none; }
+  #step-two { animation: revealUp .3s ease both; }
+  @keyframes revealUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: none; }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .type-btn, .type-btn * { animation: none !important; transition: none !important; }
-    .type-btn:hover { transform: none; }
-    .type-btn.active .tk-f1, .type-btn.active .tk-f2,
-    .type-btn.active .tk-f3, .type-btn.active .tk-arrow { opacity: 1; }
+    .type-card, .type-art, .type-check { transition: none !important; }
+    .type-card:hover { transform: none; }
+    .type-card:hover .type-art { transform: scale(1.005); }
+    #step-two { animation: none; }
   }
-  .mode-btn.active { background: white; box-shadow: 0 1px 3px rgb(0 0 0 / 0.1); }
-  .dark .mode-btn.active { background: #1e293b; }
 </style>
 <script>
 let LIBRARY_SEED = null;
+let CONTROL_SEED = null;
 if (!requireAuth()) throw new Error('auth');
 
-let currentType = 't2v';
+let currentType = null;   // nothing chosen until a card is clicked
 let currentMode = 'easy';
 
-function isVideoOut() { return ['t2v','i2v','ia2v','v2v'].includes(currentType); }
+function isVideoOut() { return ['t2v','i2v','ia2v','v2v','p2v'].includes(currentType); }
 function needsImage() { return ['i2v','i2i','ia2v'].includes(currentType) || currentType === 'v2v'; }
 function needsAudio() { return currentType === 'ia2v'; }
 function needsVideo() { return currentType === 'v2v'; }
@@ -553,6 +479,8 @@ async function loadModels() {
 }
 
 function updateUI() {
+  // Called only after a type is chosen; guard in case of an early stray call.
+  if (!currentType) return;
   document.getElementById('job_type').value = currentType;
   document.getElementById('mode').value = currentMode;
   document.getElementById('easy-panel').classList.toggle('hidden', currentMode !== 'easy');
@@ -561,11 +489,28 @@ function updateUI() {
   document.getElementById('easy-duration-wrap').classList.toggle('hidden', !isVideoOut());
   document.getElementById('adv-duration-wrap').classList.toggle('hidden', !isVideoOut());
 
+  // Pose/control panel: its own job type, and an optional add-on for t2v/i2v
+  const usesControl = currentType === 'p2v';
+  const ctlWrap = document.getElementById('control-wrap');
+  ctlWrap.classList.toggle('hidden', !usesControl);
+  document.getElementById('control-video-input').required =
+    usesControl && !CONTROL_SEED;
+
   const media = document.getElementById('media-panel');
-  const showMedia = needsImage() || needsAudio() || needsVideo() || currentType === 'v2v';
+  const showMedia = needsImage() || needsAudio() || needsVideo()
+                    || usesControl || currentType === 'v2v';
   media.classList.toggle('hidden', !showMedia);
 
-  document.getElementById('image-wrap').classList.toggle('hidden', !(needsImage() || currentType === 'v2v'));
+  // For pose jobs the image is an optional identity reference, not a start frame
+  const imgLabel = document.getElementById('image-label');
+  if (imgLabel) {
+    imgLabel.textContent = usesControl
+      ? 'Reference image (optional — who or what to render)'
+      : 'Image';
+  }
+  document.getElementById('image-req')?.classList.toggle('hidden', usesControl);
+  document.getElementById('image-wrap')
+    .classList.toggle('hidden', !(needsImage() || usesControl || currentType === 'v2v'));
   document.getElementById('audio-wrap').classList.toggle('hidden', !needsAudio());
   document.getElementById('video-wrap').classList.toggle('hidden', !needsVideo());
   document.getElementById('end-image-wrap').classList.toggle('hidden', currentType !== 'v2v' && currentType !== 'i2v');
@@ -573,19 +518,21 @@ function updateUI() {
   document.getElementById('prompt-req').classList.toggle('hidden', !promptRequired());
   document.getElementById('prompt').required = promptRequired();
   document.getElementById('image-input').required =
-    ['i2v','i2i','ia2v'].includes(currentType) && !(typeof LIBRARY_SEED !== 'undefined' && LIBRARY_SEED);
+    ['i2v','i2i','ia2v'].includes(currentType)
+    && !(typeof LIBRARY_SEED !== 'undefined' && LIBRARY_SEED);
   document.getElementById('audio-input').required = needsAudio();
   document.getElementById('video-input').required = needsVideo();
 }
 
-document.querySelectorAll('.type-btn').forEach(btn => {
+
+document.querySelectorAll('.type-card').forEach(btn => {
   btn.addEventListener('click', () => selectType(btn));
   // Arrow keys move between cards, matching radiogroup semantics.
   btn.addEventListener('keydown', (e) => {
     const keys = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'];
     if (!keys.includes(e.key)) return;
     e.preventDefault();
-    const cards = [...document.querySelectorAll('.type-btn')];
+    const cards = [...document.querySelectorAll('.type-card')];
     const i = cards.indexOf(btn);
     const step = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1 : -1;
     const next = cards[(i + step + cards.length) % cards.length];
@@ -595,7 +542,8 @@ document.querySelectorAll('.type-btn').forEach(btn => {
 });
 
 function selectType(btn) {
-  document.querySelectorAll('.type-btn').forEach(b => {
+  const first = !document.querySelector('.type-card.active');
+  document.querySelectorAll('.type-card').forEach(b => {
     b.classList.remove('active');
     b.setAttribute('aria-checked', 'false');
     b.tabIndex = -1;
@@ -604,8 +552,24 @@ function selectType(btn) {
   btn.setAttribute('aria-checked', 'true');
   btn.tabIndex = 0;
   currentType = btn.dataset.type;
+
+  // Reveal the rest of the page only once there's a type to configure.
+  const step2 = document.getElementById('step-two');
+  if (step2.hidden) {
+    step2.hidden = false;
+    const sub = document.getElementById('page-sub');
+    if (sub) sub.textContent = 'Easy mode for quick results, Advanced for full control.';
+  }
+
   updateUI();
   loadModels();
+
+  if (first) {
+    // Bring the newly revealed form into view without yanking the page.
+    requestAnimationFrame(() => {
+      step2.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
 }
 
 document.getElementById('mode-easy').addEventListener('click', () => {
@@ -639,6 +603,11 @@ document.getElementById('gen-form').addEventListener('submit', async (e) => {
   const fd = new FormData(form);
   fd.set('job_type', currentType);
   fd.set('mode', currentMode);
+
+  if (CONTROL_SEED) {
+    fd.set('control_video_library_id', CONTROL_SEED.id);
+    fd.delete('control_video');
+  }
 
   // Reusing library media instead of a fresh upload
   if (LIBRARY_SEED) {
@@ -679,13 +648,78 @@ document.getElementById('gen-form').addEventListener('submit', async (e) => {
   }
 });
 
-updateUI();
-loadModels();
+// updateUI()/loadModels() intentionally deferred until a type is picked.
 document.getElementById('model-family')?.addEventListener('change', () => {
   fillModelSelect(allModelsCache);
 });
 document.getElementById('model-refresh')?.addEventListener('click', () => loadModels());
-</script>
+
+// ─── Pose / control-guided generation ────────────────────────────────────
+
+function applyControlSeed(seed) {
+  CONTROL_SEED = seed;
+  const chip = document.getElementById('control-chip');
+  if (!seed) { chip.classList.add('hidden'); return; }
+  document.getElementById('control-chip-title').textContent = seed.title || 'Driving video';
+  chip.classList.remove('hidden');
+  const input = document.getElementById('control-video-input');
+  if (input) { input.required = false; input.value = ''; }
+}
+
+function clearControlSeed() {
+  CONTROL_SEED = null;
+  document.getElementById('control-chip').classList.add('hidden');
+  updateUI();
+}
+
+document.getElementById('control-video-input')?.addEventListener('change', (e) => {
+  if (e.target.files && e.target.files.length) clearControlSeed();
+});
+
+document.getElementById('control-strength')?.addEventListener('input', (e) => {
+  document.getElementById('control-strength-val').textContent =
+    Number(e.target.value).toFixed(2);
+});
+
+const CONTROL_HINTS = {
+  pose: 'Transfers a performance onto your subject without copying their appearance.',
+  depth: 'Follows 3D structure and camera movement; good for scenes and environments.',
+  canny: 'Follows outlines and composition; keeps layout, changes style.',
+  flow: 'Follows raw movement without interpreting what is moving.',
+  gray: 'Follows brightness only; loosest of the guided modes.',
+  raw: 'Sends the clip unprocessed — the model decides what to take from it.',
+};
+document.getElementById('control-type')?.addEventListener('change', (e) => {
+  const hint = document.getElementById('control-type-hint');
+  if (hint) hint.textContent = CONTROL_HINTS[e.target.value] || '';
+});
+
+// Pick a driving video from the library
+document.getElementById('pick-control-library-btn')?.addEventListener('click', async () => {
+  const modal = document.getElementById('lib-modal');
+  const grid = document.getElementById('lib-modal-grid');
+  modal.classList.remove('hidden');
+  grid.innerHTML = '<p class="col-span-full text-slate-500 text-sm">Loading…</p>';
+  try {
+    const data = await API.get('/api/library?media_type=video');
+    const items = data.items || [];
+    grid.innerHTML = items.length ? items.map(it => `
+      <button type="button" onclick='pickControl(${JSON.stringify(JSON.stringify(it))})'
+        class="rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 hover:ring-2 hover:ring-indigo-500 transition">
+        <video src="${it.url}" class="w-full h-24 object-cover bg-black" muted></video>
+        <p class="text-[10px] p-1 truncate text-left">${escapeHtml(it.title || 'Untitled')}</p>
+      </button>`).join('')
+      : '<p class="col-span-full text-slate-500 text-sm">No videos in your library yet.</p>';
+  } catch (e) {
+    grid.innerHTML = '<p class="col-span-full text-red-500 text-sm">' + escapeHtml(e.message || 'Failed') + '</p>';
+  }
+});
+
+function pickControl(json) {
+  const it = typeof json === 'string' ? JSON.parse(json) : json;
+  applyControlSeed({ id: it.id, url: it.url, title: it.title });
+  closeLibModal();
+}
 
 // ─── Library integration ──────────────────────────────────────────────────
 
@@ -753,12 +787,16 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLibMo
   try {
     const seed = JSON.parse(sessionStorage.getItem('library_seed') || 'null');
     if (!seed) return;
-    if (seed.media_type === 'image' && !['i2v','i2i','ia2v','v2v'].includes(currentType)) {
-      const btn = document.querySelector('.type-btn[data-type="i2i"]');
-      if (btn) btn.click();
+    // Nothing is selected on load now, so pick a type that fits the media.
+    const wanted = seed.media_type === 'video' ? 'v2v'
+                 : seed.media_type === 'audio' ? 'ia2v' : 'i2i';
+    if (!currentType || !['i2v','i2i','ia2v','v2v'].includes(currentType)) {
+      const btn = document.querySelector(`.type-card[data-type="${wanted}"]`);
+      if (btn) selectType(btn);
     }
     applyLibrarySeed(seed);
     sessionStorage.removeItem('library_seed');
   } catch (_) {}
 })();
+</script>
 {% endblock %}
