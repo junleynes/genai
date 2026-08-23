@@ -127,7 +127,6 @@ class ServerConfigIn(BaseModel):
     wan2gp_outputs_http_base: Optional[str] = None
     wan2gp_input_dir: Optional[str] = None
     wan2gp_input_remote_prefix: Optional[str] = None
-    genai_public_base: Optional[str] = None
 
 
 class UserUpdateIn(BaseModel):
@@ -230,10 +229,6 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "wan2gp_input_remote_prefix": (
             body.wan2gp_input_remote_prefix.strip()
             if body.wan2gp_input_remote_prefix is not None else None
-        ),
-        "genai_public_base": (
-            body.genai_public_base.strip().rstrip("/")
-            if body.genai_public_base is not None else None
         ),
     })
 

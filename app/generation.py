@@ -428,10 +428,9 @@ def mcp_upload_media(mcp_url: str, local_path: str) -> str:
     Make a local input file reachable by WanGP.
 
     Preferred: wangp_create_gallery_upload (PUT bytes, get a gallery id).
-    Builds without that tool need one of:
-      - genai_public_base:  WanGP pulls the file over HTTP from this server
-      - wan2gp_input_dir + wan2gp_input_remote_prefix: shared/SMB folder both
-        machines can see, so we copy in and hand over the remote-side path
+    Builds without that tool use wan2gp_input_dir + wan2gp_input_remote_prefix:
+    a shared folder both machines can see, so we copy the file in and hand
+    WanGP the path as it sees it.
     """
     path = Path(local_path)
     if not path.is_file():
@@ -486,63 +485,59 @@ def mcp_upload_media(mcp_url: str, local_path: str) -> str:
 
 
 def _stage_input_without_gallery(path: Path) -> str:
-    """Expose a local input file to WanGP when no upload tool exists."""
+    """
+    Expose a local input file to WanGP when the server has no upload tool.
+
+    Uses a folder both machines can see: we copy the file in, then hand WanGP
+    the path *as WanGP sees it*. Passing a URL instead does not work — WanGP
+    treats the value as a filesystem path and joins it onto its own working
+    directory, producing e.g. C:\\AI-Tools\\Wan2GP\\http:\\host\\file.jpg
+    and failing with Errno 22.
+    """
     settings = db.get_settings()
-
-    # Option A: shared folder (SMB/NFS mount) visible to both machines.
     shared_dir = (settings.get("wan2gp_input_dir") or "").strip()
-    if shared_dir:
-        dest_dir = Path(shared_dir)
-        try:
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            dest = dest_dir / path.name
-            if not (dest.exists() and dest.stat().st_size == path.stat().st_size):
-                shutil.copy2(path, dest)
-        except Exception as e:
-            raise RuntimeError(f"could not stage input into {shared_dir}: {e}")
-        prefix = (settings.get("wan2gp_input_remote_prefix") or "").strip()
-        if prefix:
-            sep = "\\" if ("\\" in prefix or ":" in prefix[:3]) else "/"
-            remote = prefix.rstrip("/\\") + sep + path.name
-            logger.info("Staged input for WanGP at %s", remote)
-            return remote
-        logger.info("Staged input for WanGP at %s", dest)
-        return str(dest)
+    remote_prefix = (settings.get("wan2gp_input_remote_prefix") or "").strip()
 
-    # Option B: let WanGP fetch it over HTTP from this server.
-    public_base = (settings.get("genai_public_base") or "").strip().rstrip("/")
-    if public_base:
-        static_root = (UPLOAD_DIR.parent).resolve()  # <app>/static
-        try:
-            rel = path.resolve().relative_to(static_root)
-            from urllib.parse import quote
-            url = f"{public_base}/static/{quote(str(rel).replace(chr(92), '/'))}"
-            logger.info("Serving input to WanGP via %s", url)
-            return url
-        except ValueError:
-            # Outside static/ — copy it in so it becomes reachable.
-            try:
-                staged_dir = static_root / "library"
-                staged_dir.mkdir(parents=True, exist_ok=True)
-                dest = staged_dir / path.name
-                if not (dest.exists() and dest.stat().st_size == path.stat().st_size):
-                    shutil.copy2(path, dest)
-                from urllib.parse import quote
-                url = f"{public_base}/static/library/{quote(dest.name)}"
-                logger.info("Copied input into static and serving via %s", url)
-                return url
-            except Exception as e:
-                logger.warning("could not stage %s into static: %s", path, e)
+    if not shared_dir:
+        raise RuntimeError(
+            "This WanGP build has no wangp_create_gallery_upload tool, so input "
+            "media must go through a shared folder. Set 'Shared input folder' and "
+            "'Shared input folder — WanGP-side path' in Admin → Wan2GP Server. "
+            f"(file={path.name})"
+        )
 
-    raise RuntimeError(
-        "This WanGP build has no wangp_create_gallery_upload tool, so input media "
-        "cannot be sent over MCP, and no staging route is configured. "
-        f"genai_public_base={public_base or '(empty)'} "
-        f"wan2gp_input_dir={shared_dir or '(empty)'} "
-        f"file={path} "
-        "— set one of these in Admin → Wan2GP Server and click Save."
+    dest_dir = Path(shared_dir)
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        raise RuntimeError(f"shared input folder {shared_dir} is not writable: {e}")
+
+    # A dropped SMB mount silently becomes an ordinary empty local directory,
+    # which would hand WanGP a path to a file it cannot see. Check we can
+    # actually write, and warn loudly if the mount looks wrong.
+    try:
+        dest = dest_dir / path.name
+        if not (dest.exists() and dest.stat().st_size == path.stat().st_size):
+            shutil.copy2(path, dest)
+        if not dest.is_file() or dest.stat().st_size != path.stat().st_size:
+            raise RuntimeError("copy verification failed")
+    except Exception as e:
+        raise RuntimeError(
+            f"could not stage input into {shared_dir}: {e} "
+            "— check the share is mounted and writable by the GenAI service account"
+        )
+
+    if remote_prefix:
+        sep = "\\" if ("\\" in remote_prefix or ":" in remote_prefix[:3]) else "/"
+        remote = remote_prefix.rstrip("/\\") + sep + path.name
+        logger.info("Staged input for WanGP at %s", remote)
+        return remote
+
+    logger.warning(
+        "No WanGP-side path configured; sending %s, which only works if WanGP "
+        "sees the identical path.", dest
     )
-
+    return str(dest)
 
 
 def _resolve_local_media(p: str | None) -> Optional[str]:

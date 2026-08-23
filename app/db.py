@@ -53,7 +53,6 @@ DEFAULT_SETTINGS = {
     # Input staging for WanGP builds with no wangp_create_gallery_upload tool
     "wan2gp_input_dir": "",            # local/mounted dir both servers can see
     "wan2gp_input_remote_prefix": "",  # same dir as WanGP sees it, e.g. C:\AI-Tools\Wan2GP\inputs
-    "genai_public_base": "",           # e.g. http://GENAI_HOST:8000 (WanGP pulls inputs)
     "wan2gp_enabled": False,
     "wan2gp_cli_args": "--attention sdpa --profile 4",
     "default_model_type": "ltx2_22B_distilled",
