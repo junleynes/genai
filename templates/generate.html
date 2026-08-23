@@ -9,7 +9,7 @@
 
   <div id="type-tabs" role="radiogroup" aria-label="Generation type">
     <button type="button" data-type="t2v" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" aria-label="Text to Video. Generate videos from text prompts">
+      class="type-card" data-label="Text → Video" aria-label="Text to Video. Generate videos from text prompts">
       <img class="type-art" src="/static/img/cards/t2v.jpg" alt="" aria-hidden="true"
            width="900" height="604" loading="lazy" decoding="async" />
       <span class="type-check" aria-hidden="true">
@@ -18,7 +18,7 @@
       </span>
     </button>
     <button type="button" data-type="i2v" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" aria-label="Image to Video. Animate still images into videos">
+      class="type-card" data-label="Image → Video" aria-label="Image to Video. Animate still images into videos">
       <img class="type-art" src="/static/img/cards/i2v.jpg" alt="" aria-hidden="true"
            width="900" height="604" loading="lazy" decoding="async" />
       <span class="type-check" aria-hidden="true">
@@ -27,7 +27,7 @@
       </span>
     </button>
     <button type="button" data-type="ia2v" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" aria-label="Image plus Audio to Video. Combine audio and images to create videos">
+      class="type-card" data-label="Image + Audio → Video" aria-label="Image plus Audio to Video. Combine audio and images to create videos">
       <img class="type-art" src="/static/img/cards/ia2v.jpg" alt="" aria-hidden="true"
            width="900" height="604" loading="lazy" decoding="async" />
       <span class="type-check" aria-hidden="true">
@@ -36,7 +36,7 @@
       </span>
     </button>
     <button type="button" data-type="v2v" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" aria-label="Video to Video. Restyle and transform existing footage">
+      class="type-card" data-label="Video → Video" aria-label="Video to Video. Restyle and transform existing footage">
       <img class="type-art" src="/static/img/cards/v2v.jpg" alt="" aria-hidden="true"
            width="900" height="604" loading="lazy" decoding="async" />
       <span class="type-check" aria-hidden="true">
@@ -45,7 +45,7 @@
       </span>
     </button>
     <button type="button" data-type="p2v" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" aria-label="Pose Driven to Video. Animate characters using pose data">
+      class="type-card" data-label="Pose Driven → Video" aria-label="Pose Driven to Video. Animate characters using pose data">
       <img class="type-art" src="/static/img/cards/p2v.jpg" alt="" aria-hidden="true"
            width="900" height="604" loading="lazy" decoding="async" />
       <span class="type-check" aria-hidden="true">
@@ -54,7 +54,7 @@
       </span>
     </button>
     <button type="button" data-type="t2i" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" aria-label="Text to Image. Generate images from text descriptions">
+      class="type-card" data-label="Text → Image" aria-label="Text to Image. Generate images from text descriptions">
       <img class="type-art" src="/static/img/cards/t2i.jpg" alt="" aria-hidden="true"
            width="900" height="604" loading="lazy" decoding="async" />
       <span class="type-check" aria-hidden="true">
@@ -63,12 +63,26 @@
       </span>
     </button>
     <button type="button" data-type="i2i" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" aria-label="Image to Image. Transform images with new styles and variations">
+      class="type-card" data-label="Image → Image" aria-label="Image to Image. Transform images with new styles and variations">
       <img class="type-art" src="/static/img/cards/i2i.jpg" alt="" aria-hidden="true"
            width="900" height="604" loading="lazy" decoding="async" />
       <span class="type-check" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
              stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+  </div>
+
+  <div id="selected-bar" hidden>
+    <button type="button" id="change-type" class="change-type-btn">
+      <span class="change-back" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </span>
+      <img id="selected-art" src="" alt="" aria-hidden="true" />
+      <span class="change-copy">
+        <span id="selected-title" class="change-title"></span>
+        <span class="change-hint">Change type</span>
       </span>
     </button>
   </div>
@@ -328,6 +342,49 @@
   }
   .type-card.active .type-check { opacity: 1; transform: scale(1); }
 
+  /* ── Selected-type bar (replaces the grid once a type is chosen) ───── */
+  #selected-bar[hidden] { display: none; }
+  #selected-bar { margin-bottom: 1.5rem; animation: revealUp .25s ease both; }
+
+  .change-type-btn {
+    display: flex; align-items: center; gap: .75rem;
+    width: 100%;
+    padding: .5rem .75rem .5rem .5rem;
+    border-radius: .875rem;
+    border: 1px solid rgba(148,163,184,.25);
+    background: #fff;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color .2s ease, background .2s ease;
+  }
+  .dark .change-type-btn { background: #0f172a; }
+  .change-type-btn:hover { border-color: var(--brand); }
+  .change-type-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+  .change-back {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; flex: none;
+    border-radius: 999px;
+    color: #64748b;
+  }
+  .dark .change-back { color: #94a3b8; }
+  .change-type-btn:hover .change-back { color: var(--brand); }
+
+  #selected-art {
+    width: 64px; height: 43px; flex: none;
+    object-fit: cover; border-radius: .5rem;
+    background: #000;
+  }
+  .change-copy { display: flex; flex-direction: column; min-width: 0; }
+  .change-title {
+    font-size: .875rem; font-weight: 650; line-height: 1.2; color: #0f172a;
+  }
+  .dark .change-title { color: #e2e8f0; }
+  .change-hint { font-size: .6875rem; color: #64748b; margin-top: .0625rem; }
+  .dark .change-hint { color: #94a3b8; }
+
+  #type-tabs[hidden] { display: none; }
+
   /* ── Step reveal ───────────────────────────────────────────────────── */
   /* Mode toggle and the form stay hidden until a type is chosen. */
   #step-two[hidden] { display: none; }
@@ -536,13 +593,13 @@ document.querySelectorAll('.type-card').forEach(btn => {
     const i = cards.indexOf(btn);
     const step = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1 : -1;
     const next = cards[(i + step + cards.length) % cards.length];
+    // Move focus only — selecting here would hide the grid mid-browse.
+    // Enter or Space commits, via the button's own click.
     next.focus();
-    selectType(next);
   });
 });
 
 function selectType(btn) {
-  const first = !document.querySelector('.type-card.active');
   document.querySelectorAll('.type-card').forEach(b => {
     b.classList.remove('active');
     b.setAttribute('aria-checked', 'false');
@@ -553,24 +610,42 @@ function selectType(btn) {
   btn.tabIndex = 0;
   currentType = btn.dataset.type;
 
-  // Reveal the rest of the page only once there's a type to configure.
-  const step2 = document.getElementById('step-two');
-  if (step2.hidden) {
-    step2.hidden = false;
-    const sub = document.getElementById('page-sub');
-    if (sub) sub.textContent = 'Easy mode for quick results, Advanced for full control.';
-  }
+  // The picker has done its job — swap the whole grid for a compact bar
+  // naming the choice, so the form gets the full page.
+  document.getElementById('type-tabs').hidden = true;
+
+  const bar = document.getElementById('selected-bar');
+  const art = document.getElementById('selected-art');
+  const cardArt = btn.querySelector('.type-art');
+  if (cardArt) art.src = cardArt.getAttribute('src');
+  document.getElementById('selected-title').textContent =
+    btn.dataset.label || (btn.getAttribute('aria-label') || '').split('.')[0];
+  bar.hidden = false;
+
+  document.getElementById('step-two').hidden = false;
+  const sub = document.getElementById('page-sub');
+  if (sub) sub.textContent = 'Easy mode for quick results, Advanced for full control.';
 
   updateUI();
   loadModels();
-
-  if (first) {
-    // Bring the newly revealed form into view without yanking the page.
-    requestAnimationFrame(() => {
-      step2.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+
+function showTypePicker() {
+  // Back to the grid. The chosen type is kept so returning to the form
+  // doesn't silently discard what was already filled in.
+  document.getElementById('step-two').hidden = true;
+  document.getElementById('selected-bar').hidden = true;
+  const grid = document.getElementById('type-tabs');
+  grid.hidden = false;
+  const sub = document.getElementById('page-sub');
+  if (sub) sub.textContent = 'Pick what you want to make.';
+  const active = grid.querySelector('.type-card.active');
+  (active || grid.querySelector('.type-card'))?.focus();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+document.getElementById('change-type')?.addEventListener('click', showTypePicker);
 
 document.getElementById('mode-easy').addEventListener('click', () => {
   currentMode = 'easy';
