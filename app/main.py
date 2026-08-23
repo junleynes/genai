@@ -122,10 +122,12 @@ class ServerConfigIn(BaseModel):
     queue_enabled: bool = True
     max_concurrent_jobs: int = 1
     concurrent_scope: str = "overall"  # overall | per_user
-    wan2gp_outputs_http_base: str = ""
-    wan2gp_input_dir: str = ""
-    wan2gp_input_remote_prefix: str = ""
-    genai_public_base: str = ""
+    # Optional/None so a stale admin page that omits a field cannot wipe it
+    # (db.update_settings skips None values).
+    wan2gp_outputs_http_base: Optional[str] = None
+    wan2gp_input_dir: Optional[str] = None
+    wan2gp_input_remote_prefix: Optional[str] = None
+    genai_public_base: Optional[str] = None
 
 
 class UserUpdateIn(BaseModel):
@@ -217,10 +219,22 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "queue_enabled": bool(body.queue_enabled),
         "max_concurrent_jobs": max_c,
         "concurrent_scope": scope,
-        "wan2gp_outputs_http_base": (body.wan2gp_outputs_http_base or "").strip().rstrip("/"),
-        "wan2gp_input_dir": (body.wan2gp_input_dir or "").strip(),
-        "wan2gp_input_remote_prefix": (body.wan2gp_input_remote_prefix or "").strip(),
-        "genai_public_base": (body.genai_public_base or "").strip().rstrip("/"),
+        "wan2gp_outputs_http_base": (
+            body.wan2gp_outputs_http_base.strip().rstrip("/")
+            if body.wan2gp_outputs_http_base is not None else None
+        ),
+        "wan2gp_input_dir": (
+            body.wan2gp_input_dir.strip()
+            if body.wan2gp_input_dir is not None else None
+        ),
+        "wan2gp_input_remote_prefix": (
+            body.wan2gp_input_remote_prefix.strip()
+            if body.wan2gp_input_remote_prefix is not None else None
+        ),
+        "genai_public_base": (
+            body.genai_public_base.strip().rstrip("/")
+            if body.genai_public_base is not None else None
+        ),
     })
 
 

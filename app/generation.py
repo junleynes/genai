@@ -535,9 +535,12 @@ def _stage_input_without_gallery(path: Path) -> str:
                 logger.warning("could not stage %s into static: %s", path, e)
 
     raise RuntimeError(
-        "This WanGP build has no wangp_create_gallery_upload tool, so input images "
-        "cannot be sent over MCP. Set either 'Shared input folder' (a path both "
-        "servers can see) or 'GenAI public base URL' in Admin → Wan2GP Server."
+        "This WanGP build has no wangp_create_gallery_upload tool, so input media "
+        "cannot be sent over MCP, and no staging route is configured. "
+        f"genai_public_base={public_base or '(empty)'} "
+        f"wan2gp_input_dir={shared_dir or '(empty)'} "
+        f"file={path} "
+        "— set one of these in Admin → Wan2GP Server and click Save."
     )
 
 
