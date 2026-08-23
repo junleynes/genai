@@ -127,6 +127,7 @@ class ServerConfigIn(BaseModel):
     wan2gp_outputs_http_base: Optional[str] = None
     wan2gp_input_dir: Optional[str] = None
     wan2gp_input_remote_prefix: Optional[str] = None
+    wan2gp_control_letters: Optional[str] = None
 
 
 class UserUpdateIn(BaseModel):
@@ -229,6 +230,10 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "wan2gp_input_remote_prefix": (
             body.wan2gp_input_remote_prefix.strip()
             if body.wan2gp_input_remote_prefix is not None else None
+        ),
+        "wan2gp_control_letters": (
+            body.wan2gp_control_letters.strip()
+            if body.wan2gp_control_letters is not None else None
         ),
     })
 
@@ -444,13 +449,18 @@ async def create_job(
     audio: Optional[UploadFile] = File(None),
     video: Optional[UploadFile] = File(None),
     end_image: Optional[UploadFile] = File(None),
+    # Pose / control-guided generation
+    control_video: Optional[UploadFile] = File(None),
+    control_type: str = Form("pose"),
+    control_strength: Optional[float] = Form(None),
+    control_video_library_id: str = Form(""),
     # Reuse existing library media instead of uploading (ids from /api/library)
     image_library_id: str = Form(""),
     audio_library_id: str = Form(""),
     video_library_id: str = Form(""),
     end_image_library_id: str = Form(""),
 ):
-    allowed = {"t2v", "i2v", "t2i", "i2i", "ia2v", "v2v"}
+    allowed = {"t2v", "i2v", "t2i", "i2i", "ia2v", "v2v", "p2v"}
     if job_type not in allowed:
         raise HTTPException(400, f"Invalid job_type. Allowed: {sorted(allowed)}")
     if mode not in ("easy", "advanced"):
@@ -474,6 +484,14 @@ async def create_job(
     lib_audio = from_library(audio_library_id, "audio")
     lib_video = from_library(video_library_id, "video")
     lib_end_image = from_library(end_image_library_id, "image")
+    lib_control = from_library(control_video_library_id, "video")
+
+    if job_type == "p2v" and not control_video and not lib_control:
+        raise HTTPException(400, "Pose-guided generation needs a driving video")
+    if control_type and control_type not in (
+        "pose", "depth", "canny", "gray", "flow", "raw"
+    ):
+        raise HTTPException(400, f"Unknown control type: {control_type}")
 
     # Require media for certain types
     if job_type in ("i2v", "i2i", "ia2v") and not image and not lib_image:
@@ -502,6 +520,7 @@ async def create_job(
     audio_url = await save_upload(audio, "aud") or lib_audio
     video_url = await save_upload(video, "vid") or lib_video
     end_image_url = await save_upload(end_image, "end") or lib_end_image
+    control_video_url = await save_upload(control_video, "ctl") or lib_control
 
     params = {
         "resolution": resolution,
@@ -517,11 +536,14 @@ async def create_job(
         "audio_url": audio_url,
         "video_url": video_url,
         "end_image_url": end_image_url,
+        "control_video_url": control_video_url,
+        "control_type": control_type if control_video_url else None,
+        "control_strength": control_strength,
     }
     if mode == "easy":
         params["steps"] = min(params["steps"], 25)
         params["resolution"] = params.get("resolution") or "832x480"
-        if job_type in ("t2v", "i2v", "ia2v", "v2v"):
+        if job_type in ("t2v", "i2v", "ia2v", "v2v", "p2v"):
             params["duration_seconds"] = min(float(params["duration_seconds"]), 5)
 
     prompt_clean = (prompt or "").strip()
@@ -573,6 +595,12 @@ def list_library(
         limit=max(1, min(int(limit or 500), 2000)),
     )
     return {"items": items, "stats": db.library_stats(user["id"])}
+
+
+@app.get("/api/library/showcase")
+def library_showcase(user: dict = Depends(auth.get_current_user)):
+    """Latest real result per job type, used as Create-page card previews."""
+    return db.library_showcase(user["id"])
 
 
 @app.get("/api/library/{item_id}")

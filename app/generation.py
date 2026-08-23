@@ -102,6 +102,44 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     if jtype == "ia2v" and audio_path:
         settings["audio_guide"] = str(audio_path)
         settings["audio_prompt_type"] = "A"
+    # ── Pose / control-guided generation ──────────────────────────────────
+    # A driving video supplies motion; the model follows its pose, depth or
+    # edges rather than the guide's appearance. Available as its own job type
+    # and as an add-on to t2v / i2v (reference image + driving motion).
+    control_path = (
+        job.get("control_video_path") or params.get("control_video_path")
+        or params.get("control_video_url") or job.get("control_video_url")
+    )
+    control_type = (params.get("control_type") or "pose").lower()
+
+    if control_path and jtype in ("p2v", "t2v", "i2v"):
+        settings["video_guide"] = str(control_path)
+        letter = _control_letter(control_type)
+        settings["video_prompt_type"] = f"V{letter}"
+        # A reference image still drives identity/appearance when supplied.
+        if image_path:
+            settings["image_refs"] = [str(image_path)]
+            settings["video_prompt_type"] = f"V{letter}I"
+            # image_start would pin frame one to the reference and fight the
+            # guide's first pose, so it is deliberately not set here.
+            settings.pop("image_start", None)
+            settings.pop("image_prompt_type", None)
+        strength = params.get("control_strength")
+        if strength is not None:
+            try:
+                settings["control_net_weight"] = float(strength)
+            except (TypeError, ValueError):
+                pass
+        # Optional window: apply the guide to part of the clip only
+        for key, target in (("control_start", "video_guide_start"),
+                            ("control_end", "video_guide_end")):
+            if params.get(key) is not None:
+                settings[target] = params[key]
+        logger.info(
+            "Job %s: %s-guided generation (video_prompt_type=%s)",
+            job.get("id"), control_type, settings["video_prompt_type"],
+        )
+
     if jtype in ("t2i", "i2i"):
         settings["image_mode"] = 1
         settings["video_length"] = 1
@@ -1572,6 +1610,7 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
                 url=url,
                 media_type=_media_type_for(url),
                 job_id=job_id,
+                job_type=job.get("job_type") or "",
                 prompt=job.get("prompt") or "",
                 title=job.get("title") or "",
                 model=str(params.get("model_type") or params.get("model") or ""),
@@ -1822,6 +1861,45 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
 
 
 # job_type → MCP list filters (main_output / inputs)
+# WanGP/VACE encodes guide preprocessing as letters in `video_prompt_type`.
+# "V" marks that a guide video is supplied; the second letter selects the
+# preprocessor. Overridable per-install via the wan2gp_control_letters setting
+# because the alphabet has shifted between WanGP releases.
+CONTROL_LETTERS = {
+    "pose": "P",     # OpenPose skeleton — motion/pose transfer
+    "depth": "D",    # depth map
+    "canny": "E",    # edges
+    "gray": "G",     # luminance
+    "flow": "F",     # optical flow
+    "raw": "",       # pass the guide through unprocessed
+}
+
+CONTROL_LABELS = {
+    "pose": "Pose (skeleton)",
+    "depth": "Depth",
+    "canny": "Edges",
+    "gray": "Grayscale",
+    "flow": "Motion flow",
+    "raw": "Raw video",
+}
+
+
+def _control_letter(control_type: str) -> str:
+    """Letter for a control type, honouring any per-install override."""
+    try:
+        override = (db.get_settings().get("wan2gp_control_letters") or "").strip()
+    except Exception:
+        override = ""
+    if override:
+        # format: "pose=P,depth=D,canny=E"
+        for pair in override.split(","):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                if k.strip().lower() == control_type:
+                    return v.strip()
+    return CONTROL_LETTERS.get(control_type, "P")
+
+
 _JOB_TYPE_FILTERS = {
     "t2v": {"main_output": "video"},
     "i2v": {"main_output": "video", "inputs": "image"},
@@ -1829,6 +1907,8 @@ _JOB_TYPE_FILTERS = {
     "v2v": {"main_output": "video", "inputs": "video"},
     "t2i": {"main_output": "image"},
     "i2i": {"main_output": "image", "inputs": "image"},
+    # Pose/control-driven video needs a VACE-style model that accepts a guide
+    "p2v": {"main_output": "video", "inputs": "video"},
 }
 
 
@@ -1926,6 +2006,16 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
                     s += 2
                 if "i2i" in blob or "img2img" in blob or "edit" in blob:
                     s += 1
+        elif job_type == "p2v":
+            if "video" in mo:
+                s += 3
+            if "image" in mo and "video" not in mo:
+                s -= 2
+            # VACE / control-capable models are the only ones that can use a guide
+            if any(k in blob for k in ("vace", "control", "pose", "fun")):
+                s += 4
+            if "video" in inp:
+                s += 2
         elif job_type in ("t2v", "i2v", "ia2v", "v2v"):
             if "video" in mo:
                 s += 3

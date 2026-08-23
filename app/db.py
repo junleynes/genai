@@ -52,7 +52,10 @@ DEFAULT_SETTINGS = {
     "wan2gp_outputs_http_base": "",  # e.g. http://HOST:8090 serving WanGP outputs/
     # Input staging for WanGP builds with no wangp_create_gallery_upload tool
     "wan2gp_input_dir": "",            # local/mounted dir both servers can see
-    "wan2gp_input_remote_prefix": "",  # same dir as WanGP sees it, e.g. C:\AI-Tools\Wan2GP\inputs
+    "wan2gp_input_remote_prefix": "",
+    # Override VACE guide letters if your WanGP build uses a different alphabet,
+    # e.g. "pose=P,depth=D,canny=E". Empty uses the built-in defaults.
+    "wan2gp_control_letters": "",  # same dir as WanGP sees it, e.g. C:\AI-Tools\Wan2GP\inputs
     "wan2gp_enabled": False,
     "wan2gp_cli_args": "--attention sdpa --profile 4",
     "default_model_type": "ltx2_22B_distilled",
@@ -325,6 +328,7 @@ def add_library_item(
     url: str,
     media_type: str,
     job_id: Optional[str] = None,
+    job_type: str = "",
     prompt: str = "",
     title: str = "",
     model: str = "",
@@ -348,6 +352,7 @@ def add_library_item(
             "job_id": job_id,
             "url": url,
             "media_type": media_type,
+            "job_type": job_type,          # t2v / i2v / ia2v / v2v / t2i / i2i
             "title": (title or prompt[:60] or "Untitled").strip(),
             "prompt": prompt or "",
             "model": model or "",
@@ -410,4 +415,31 @@ def library_stats(user_id: str) -> dict:
         "images": sum(1 for i in items if i.get("media_type") == "image"),
         "videos": sum(1 for i in items if i.get("media_type") == "video"),
         "favorites": sum(1 for i in items if i.get("favorite")),
+    }
+
+
+def library_showcase(user_id: str) -> dict:
+    """
+    Newest usable result per job type, for the Create page's preview cards.
+    Favourites win over recency so people can pin what they want to see.
+    """
+    items = get_library(user_id, limit=2000)
+    best: dict[str, dict] = {}
+    for it in items:
+        jt = it.get("job_type") or ""
+        if not jt or it.get("source") != "generated":
+            continue
+        cur = best.get(jt)
+        if cur is None:
+            best[jt] = it
+        elif it.get("favorite") and not cur.get("favorite"):
+            best[jt] = it
+    return {
+        jt: {
+            "url": v.get("url"),
+            "media_type": v.get("media_type"),
+            "title": v.get("title"),
+            "prompt": (v.get("prompt") or "")[:120],
+        }
+        for jt, v in best.items()
     }
