@@ -424,9 +424,21 @@ def mcp_call_tool(mcp_url: str, name: str, arguments: dict, timeout: float = 120
 
 
 def mcp_upload_media(mcp_url: str, local_path: str) -> str:
+    """
+    Make a local input file reachable by WanGP.
+
+    Preferred: wangp_create_gallery_upload (PUT bytes, get a gallery id).
+    Builds without that tool need one of:
+      - genai_public_base:  WanGP pulls the file over HTTP from this server
+      - wan2gp_input_dir + wan2gp_input_remote_prefix: shared/SMB folder both
+        machines can see, so we copy in and hand over the remote-side path
+    """
     path = Path(local_path)
     if not path.is_file():
         return str(local_path)
+
+    if not mcp_has_tool(mcp_url, "wangp_create_gallery_upload"):
+        return _stage_input_without_gallery(path)
 
     create = mcp_call_tool(
         mcp_url, "wangp_create_gallery_upload", {"filename": path.name}, timeout=60.0
@@ -471,6 +483,50 @@ def mcp_upload_media(mcp_url: str, local_path: str) -> str:
     if not gallery_id:
         raise RuntimeError(f"Upload OK but no gallery_id: {create}")
     return str(gallery_id)
+
+
+def _stage_input_without_gallery(path: Path) -> str:
+    """Expose a local input file to WanGP when no upload tool exists."""
+    settings = db.get_settings()
+
+    # Option A: shared folder (SMB/NFS mount) visible to both machines.
+    shared_dir = (settings.get("wan2gp_input_dir") or "").strip()
+    if shared_dir:
+        dest_dir = Path(shared_dir)
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / path.name
+            if not (dest.exists() and dest.stat().st_size == path.stat().st_size):
+                shutil.copy2(path, dest)
+        except Exception as e:
+            raise RuntimeError(f"could not stage input into {shared_dir}: {e}")
+        prefix = (settings.get("wan2gp_input_remote_prefix") or "").strip()
+        if prefix:
+            sep = "\\" if ("\\" in prefix or ":" in prefix[:3]) else "/"
+            remote = prefix.rstrip("/\\") + sep + path.name
+            logger.info("Staged input for WanGP at %s", remote)
+            return remote
+        logger.info("Staged input for WanGP at %s", dest)
+        return str(dest)
+
+    # Option B: let WanGP fetch it over HTTP from this server.
+    public_base = (settings.get("genai_public_base") or "").strip().rstrip("/")
+    if public_base:
+        try:
+            rel = path.resolve().relative_to((UPLOAD_DIR.parent).resolve())
+            from urllib.parse import quote
+            url = f"{public_base}/static/{quote(str(rel).replace(chr(92), '/'))}"
+            logger.info("Serving input to WanGP via %s", url)
+            return url
+        except Exception:
+            pass
+
+    raise RuntimeError(
+        "This WanGP build has no wangp_create_gallery_upload tool, so input images "
+        "cannot be sent over MCP. Set either 'Shared input folder' (a path both "
+        "servers can see) or 'GenAI public base URL' in Admin → Wan2GP Server."
+    )
+
 
 
 def _resolve_local_media(p: str | None) -> Optional[str]:
@@ -920,6 +976,26 @@ def mcp_download_via_origin_guess(mcp_url: str, remote_path: str, job_id: str) -
     raise RuntimeError(f"origin probe failed: {last_err}")
 
 
+def mcp_has_tool(mcp_url: str, *names: str) -> bool:
+    """True if the server advertises any of these tool names."""
+    try:
+        available = {str(t.get("name") or "") for t in mcp_discover_tools(mcp_url)}
+    except Exception:
+        return True  # discovery failed — don't block, let the call try
+    if not available:
+        return True  # tools/list unsupported — assume yes rather than skip
+    return any(n in available for n in names)
+
+
+def mcp_supports_gallery(mcp_url: str) -> bool:
+    return mcp_has_tool(
+        mcp_url,
+        "wangp_list_gallery",
+        "wangp_create_gallery_download",
+        "wangp_get_gallery_selection",
+    )
+
+
 def mcp_list_tool_names(mcp_url: str) -> list[str]:
     try:
         data, _ = mcp_raw_request(mcp_url, "tools/list", {}, timeout=20.0)
@@ -1274,19 +1350,57 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
 
     url = None
     transfer_errors: list[str] = []
+    has_gallery = mcp_supports_gallery(mcp_url) if mcp_url else False
+    if mcp_url and not has_gallery:
+        logger.info(
+            "Job %s: server has no gallery tools — skipping gallery strategies", job_id
+        )
+
+    def _result_path_hint() -> str | None:
+        paths = _walk_file_paths(result)
+        if paths:
+            return paths[0]
+        for f in (files if isinstance(files, list) else []):
+            if isinstance(f, str):
+                return f
+            if isinstance(f, dict) and (f.get("path") or f.get("file")):
+                return f.get("path") or f.get("file")
+        return None
+
+    # 0) Inline MCP media blocks — bytes already in the response, zero extra I/O.
+    try:
+        url = _media_blocks_to_local(job_id, result)
+        if url:
+            logger.info("Job %s: result arrived inline over MCP", job_id)
+    except Exception as e:
+        transfer_errors.append(f"inline media: {e}")
+
+    # 0b) Static HTTP root over WanGP outputs/ — the reliable path for builds
+    # with no gallery tools, so try it before the slower fallbacks.
+    if not url:
+        try:
+            out_base = (db.get_settings().get("wan2gp_outputs_http_base") or "").strip()
+            hint = _result_path_hint()
+            if out_base and hint:
+                url = mcp_download_via_outputs_http(out_base, hint, job_id)
+                if url:
+                    logger.info("Job %s transferred via outputs HTTP", job_id)
+        except Exception as e:
+            transfer_errors.append(f"outputs_http: {e}")
 
     # 1) Explicit gallery list
-    for g in gallery if isinstance(gallery, list) else []:
-        gid = _extract_gallery_id(g)
-        if gid and mcp_url:
-            try:
-                url = mcp_download_gallery_item(mcp_url, gid, job_id)
-                break
-            except Exception as e:
-                transfer_errors.append(f"gallery {gid}: {e}")
+    if not url and has_gallery:
+        for g in gallery if isinstance(gallery, list) else []:
+            gid = _extract_gallery_id(g)
+            if gid and mcp_url:
+                try:
+                    url = mcp_download_gallery_item(mcp_url, gid, job_id)
+                    break
+                except Exception as e:
+                    transfer_errors.append(f"gallery {gid}: {e}")
 
     # 2) Any gallery-like ids nested in result
-    if not url and mcp_url:
+    if not url and mcp_url and has_gallery:
         for gid in _walk_gallery_ids(result):
             try:
                 url = mcp_download_gallery_item(mcp_url, gid, job_id)
@@ -1304,7 +1418,7 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
                 remote_path = f.get("path") or f.get("file") or f.get("url") or f.get("filename")
             else:
                 remote_path = str(f)
-            if gid and mcp_url:
+            if gid and mcp_url and has_gallery:
                 try:
                     url = mcp_download_gallery_item(mcp_url, str(gid), job_id)
                     break
@@ -1331,34 +1445,15 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
             except Exception as e:
                 transfer_errors.append(str(e))
 
-    # 4b) Inline MCP media blocks (image/audio/resource) anywhere in the payload.
-    # Cheapest possible path: the bytes are already in the response.
-    if not url:
-        try:
-            url = _media_blocks_to_local(job_id, result)
-            if url:
-                logger.info("Job %s: result arrived inline over MCP", job_id)
-        except Exception as e:
-            transfer_errors.append(f"inline media: {e}")
-
     # 4c) Ask the server to register the on-disk output, then download it.
     if not url and mcp_url:
-        paths = _walk_file_paths(result)
-        hint = paths[0] if paths else None
-        if not hint:
-            for f in (files if isinstance(files, list) else []):
-                if isinstance(f, str):
-                    hint = f
-                    break
-                if isinstance(f, dict) and (f.get("path") or f.get("file")):
-                    hint = f.get("path") or f.get("file")
-                    break
+        hint = _result_path_hint()
         if hint:
-            for strategy, fn in (
-                ("resources/read", mcp_read_file_resource),
-                ("register_path", mcp_register_path_and_download),
-                ("origin_probe", mcp_download_via_origin_guess),
-            ):
+            strategies = [("resources/read", mcp_read_file_resource)]
+            if has_gallery:
+                strategies.append(("register_path", mcp_register_path_and_download))
+            strategies.append(("origin_probe", mcp_download_via_origin_guess))
+            for strategy, fn in strategies:
                 try:
                     url = fn(mcp_url, str(hint), job_id)
                     if url:
@@ -1382,37 +1477,14 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
                 except Exception as e:
                     transfer_errors.append(f"artifact: {e}")
 
-    # 6) MCP-only: list gallery & download (no Gradio required)
-    if not url and mcp_url:
-        paths = _walk_file_paths(result)
-        hint = paths[0] if paths else None
+    # 6) Gallery listing sweep — only meaningful if the server has gallery tools
+    # (outputs HTTP was already attempted first, at step 0b).
+    if not url and mcp_url and has_gallery:
         try:
-            url = mcp_fetch_result_via_gallery(mcp_url, job_id, hint)
+            url = mcp_fetch_result_via_gallery(mcp_url, job_id, _result_path_hint())
         except Exception as e:
             transfer_errors.append(f"list_gallery: {e}")
             logger.warning("gallery list transfer failed: %s", e)
-
-    # 6b) Static HTTP server root for WanGP outputs/ (reliable when gallery is empty)
-    if not url:
-        try:
-            settings = db.get_settings()
-            out_base = (settings.get("wan2gp_outputs_http_base") or "").strip()
-            paths = _walk_file_paths(result)
-            hint = paths[0] if paths else None
-            if not hint:
-                # also check generated_files strings
-                for f in (result.get("generated_files") or []):
-                    if isinstance(f, str):
-                        hint = f
-                        break
-                    if isinstance(f, dict) and f.get("path"):
-                        hint = f["path"]
-                        break
-            if out_base and hint:
-                url = mcp_download_via_outputs_http(out_base, hint, job_id)
-        except Exception as e:
-            transfer_errors.append(f"outputs_http: {e}")
-            logger.warning("outputs http transfer failed: %s", e)
 
     if not url:
         tool_names = []

@@ -122,6 +122,9 @@ class ServerConfigIn(BaseModel):
     max_concurrent_jobs: int = 1
     concurrent_scope: str = "overall"  # overall | per_user
     wan2gp_outputs_http_base: str = ""
+    wan2gp_input_dir: str = ""
+    wan2gp_input_remote_prefix: str = ""
+    genai_public_base: str = ""
 
 
 class UserUpdateIn(BaseModel):
@@ -214,6 +217,9 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "max_concurrent_jobs": max_c,
         "concurrent_scope": scope,
         "wan2gp_outputs_http_base": (body.wan2gp_outputs_http_base or "").strip().rstrip("/"),
+        "wan2gp_input_dir": (body.wan2gp_input_dir or "").strip(),
+        "wan2gp_input_remote_prefix": (body.wan2gp_input_remote_prefix or "").strip(),
+        "genai_public_base": (body.genai_public_base or "").strip().rstrip("/"),
     })
 
 
