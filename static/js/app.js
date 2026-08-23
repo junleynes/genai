@@ -28,6 +28,25 @@ const API = {
   put: (p, body) => API.request(p, { method: 'PUT', body: JSON.stringify(body || {}) }),
   patch: (p, body) => API.request(p, { method: 'PATCH', body: JSON.stringify(body || {}) }),
   del: (p) => API.request(p, { method: 'DELETE' }),
+  // Multipart: must NOT set Content-Type — the browser adds the boundary.
+  async postForm(path, formData) {
+    const headers = {};
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(path, { method: 'POST', headers, body: formData });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(
+        typeof data.detail === 'string'
+          ? data.detail
+          : (data.detail?.[0]?.msg || data.message || res.statusText)
+      );
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  },
 };
 
 function getUser() {
@@ -73,6 +92,7 @@ function renderNav() {
     home: '🏠',
     gen: '✨',
     jobs: '📋',
+    library: '🗂️',
     admin: '⚙️',
     brand: '🎨',
     server: '🖥️',
@@ -84,6 +104,7 @@ function renderNav() {
     if (user) {
       html += navLink('/generate', 'Generate', icons.gen);
       html += navLink('/jobs', 'My Jobs', icons.jobs);
+      html += navLink('/library', 'Library', icons.library);
       if (user.role === 'admin') {
         html += `<div class="pt-3 pb-1 px-3 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Admin</div>`;
         html += navLink('/admin', 'Dashboard', icons.admin);
