@@ -122,7 +122,7 @@ def _copy_result_into_static(src: str | Path, job_id: str) -> str:
     if not src.exists():
         return str(src)
     ext = src.suffix or ".mp4"
-    dest = RESULTS_DIR / f"{job_id}{ext}"
+    dest = _unique_result_name(job_id, ext)
     shutil.copy2(src, dest)
     return f"/static/results/{dest.name}"
 
@@ -512,14 +512,27 @@ def _stage_input_without_gallery(path: Path) -> str:
     # Option B: let WanGP fetch it over HTTP from this server.
     public_base = (settings.get("genai_public_base") or "").strip().rstrip("/")
     if public_base:
+        static_root = (UPLOAD_DIR.parent).resolve()  # <app>/static
         try:
-            rel = path.resolve().relative_to((UPLOAD_DIR.parent).resolve())
+            rel = path.resolve().relative_to(static_root)
             from urllib.parse import quote
             url = f"{public_base}/static/{quote(str(rel).replace(chr(92), '/'))}"
             logger.info("Serving input to WanGP via %s", url)
             return url
-        except Exception:
-            pass
+        except ValueError:
+            # Outside static/ — copy it in so it becomes reachable.
+            try:
+                staged_dir = static_root / "library"
+                staged_dir.mkdir(parents=True, exist_ok=True)
+                dest = staged_dir / path.name
+                if not (dest.exists() and dest.stat().st_size == path.stat().st_size):
+                    shutil.copy2(path, dest)
+                from urllib.parse import quote
+                url = f"{public_base}/static/library/{quote(dest.name)}"
+                logger.info("Copied input into static and serving via %s", url)
+                return url
+            except Exception as e:
+                logger.warning("could not stage %s into static: %s", path, e)
 
     raise RuntimeError(
         "This WanGP build has no wangp_create_gallery_upload tool, so input images "
@@ -536,11 +549,15 @@ def _resolve_local_media(p: str | None) -> Optional[str]:
     if path.is_file():
         return str(path)
     rel = str(p).lstrip("/")
+    root = Path(__file__).parent.parent
     for candidate in (
-        Path(__file__).parent.parent / rel,
+        root / rel,
         UPLOAD_DIR / Path(p).name,
         UPLOAD_DIR / "jobs" / Path(p).name,
-        Path(__file__).parent.parent / "static" / "uploads" / "jobs" / Path(p).name,
+        root / "static" / "uploads" / "jobs" / Path(p).name,
+        # personal library: uploaded imports and reused generations
+        root / "static" / "library" / Path(p).name,
+        RESULTS_DIR / Path(p).name,
     ):
         if candidate.is_file():
             return str(candidate)
@@ -582,6 +599,41 @@ def _mcp_origin(mcp_url: str) -> str:
     return ep.rstrip("/")
 
 
+def _unique_result_name(job_id: str, ext: str, data: bytes | None = None) -> Path:
+    """
+    Unique per-file name. Results are retained in the personal library, so a
+    retry that produces *different* output must not overwrite the earlier file.
+    If the bytes are identical to an existing file for this job, reuse it — that
+    keeps re-applying the same MCP result idempotent.
+    """
+    base = RESULTS_DIR / f"{job_id}{ext}"
+    if not base.exists():
+        return base
+    if data is not None:
+        for existing in sorted(RESULTS_DIR.glob(f"{job_id}*{ext}")):
+            try:
+                if existing.stat().st_size == len(data) and existing.read_bytes() == data:
+                    return existing
+            except OSError:
+                continue
+    stamp = time.strftime("%Y%m%d%H%M%S")
+    candidate = RESULTS_DIR / f"{job_id}_{stamp}{ext}"
+    n = 1
+    while candidate.exists():
+        candidate = RESULTS_DIR / f"{job_id}_{stamp}_{n}{ext}"
+        n += 1
+    return candidate
+
+
+def _media_type_for(url_or_ext: str) -> str:
+    low = str(url_or_ext).lower()
+    if any(low.endswith(e) for e in (".mp4", ".webm", ".mov", ".mkv", ".avi")):
+        return "video"
+    if any(low.endswith(e) for e in (".mp3", ".wav", ".flac", ".m4a", ".ogg")):
+        return "audio"
+    return "image"
+
+
 def _save_bytes_result(job_id: str, data: bytes, ext: str = ".png") -> str:
     if not ext.startswith("."):
         ext = "." + ext
@@ -596,8 +648,9 @@ def _save_bytes_result(job_id: str, data: bytes, ext: str = ".png") -> str:
         ext = ".mp4"
     elif data[:4] == b"\x1aE\xdf\xa3":
         ext = ".webm"
-    dest = RESULTS_DIR / f"{job_id}{ext}"
-    dest.write_bytes(data)
+    dest = _unique_result_name(job_id, ext, data)
+    if not dest.exists():
+        dest.write_bytes(data)
     return f"/static/results/{dest.name}"
 
 
@@ -1509,6 +1562,34 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
         "preview_url": url,
         "error": None,
     })
+
+    # Auto-file the result into the owner's personal library.
+    try:
+        job = db.get_job(job_id) or {}
+        owner = job.get("user_id")
+        if owner:
+            params = job.get("params") or {}
+            item = db.add_library_item(
+                user_id=owner,
+                url=url,
+                media_type=_media_type_for(url),
+                job_id=job_id,
+                prompt=job.get("prompt") or "",
+                title=job.get("title") or "",
+                model=str(params.get("model_type") or params.get("model") or ""),
+                params={
+                    k: params.get(k)
+                    for k in ("resolution", "steps", "seed", "guidance_scale",
+                              "duration_seconds", "fps", "model", "model_type")
+                    if params.get(k) is not None
+                },
+                source="generated",
+            )
+            logger.info("Job %s filed to library as %s", job_id, item.get("id"))
+    except Exception as e:
+        # Never fail a completed job because of library bookkeeping.
+        logger.warning("Library insert failed for job %s: %s", job_id, e)
+
     logger.info("Job %s result stored locally at %s", job_id, url)
     return True
 

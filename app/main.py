@@ -6,6 +6,7 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import Any, Optional
+from uuid import uuid4
 
 from fastapi import (
     BackgroundTasks,
@@ -434,6 +435,11 @@ async def create_job(
     audio: Optional[UploadFile] = File(None),
     video: Optional[UploadFile] = File(None),
     end_image: Optional[UploadFile] = File(None),
+    # Reuse existing library media instead of uploading (ids from /api/library)
+    image_library_id: str = Form(""),
+    audio_library_id: str = Form(""),
+    video_library_id: str = Form(""),
+    end_image_library_id: str = Form(""),
 ):
     allowed = {"t2v", "i2v", "t2i", "i2i", "ia2v", "v2v"}
     if job_type not in allowed:
@@ -441,12 +447,31 @@ async def create_job(
     if mode not in ("easy", "advanced"):
         raise HTTPException(400, "mode must be easy or advanced")
 
+    def from_library(item_id: str, want: str) -> Optional[str]:
+        """Resolve a library id to a served URL, checking ownership and type."""
+        if not item_id:
+            return None
+        item = db.get_library_item(item_id.strip(), user_id=user["id"])
+        if not item:
+            raise HTTPException(404, f"Library item not found: {item_id}")
+        if want and item.get("media_type") != want:
+            raise HTTPException(
+                400,
+                f"Library item {item_id} is {item.get('media_type')}, expected {want}",
+            )
+        return item.get("url")
+
+    lib_image = from_library(image_library_id, "image")
+    lib_audio = from_library(audio_library_id, "audio")
+    lib_video = from_library(video_library_id, "video")
+    lib_end_image = from_library(end_image_library_id, "image")
+
     # Require media for certain types
-    if job_type in ("i2v", "i2i", "ia2v") and not image:
+    if job_type in ("i2v", "i2i", "ia2v") and not image and not lib_image:
         raise HTTPException(400, "Image is required for this job type")
-    if job_type == "ia2v" and not audio:
+    if job_type == "ia2v" and not audio and not lib_audio:
         raise HTTPException(400, "Audio is required for Image+Audio → Video")
-    if job_type == "v2v" and not video and not image:
+    if job_type == "v2v" and not video and not image and not lib_video and not lib_image:
         raise HTTPException(400, "Video or start image is required for Video → Video")
 
     upload_dir = BASE / "static" / "uploads" / "jobs"
@@ -464,10 +489,10 @@ async def create_job(
         dest.write_bytes(content)
         return f"/static/uploads/jobs/{name}"
 
-    image_url = await save_upload(image, "img")
-    audio_url = await save_upload(audio, "aud")
-    video_url = await save_upload(video, "vid")
-    end_image_url = await save_upload(end_image, "end")
+    image_url = await save_upload(image, "img") or lib_image
+    audio_url = await save_upload(audio, "aud") or lib_audio
+    video_url = await save_upload(video, "vid") or lib_video
+    end_image_url = await save_upload(end_image, "end") or lib_end_image
 
     params = {
         "resolution": resolution,
@@ -515,6 +540,103 @@ async def create_job(
     return job
 
 
+# ─── Personal library ─────────────────────────────────────────────────────────
+
+class LibraryUpdateIn(BaseModel):
+    title: Optional[str] = None
+    tags: Optional[list[str]] = None
+    favorite: Optional[bool] = None
+
+
+@app.get("/api/library")
+def list_library(
+    user: dict = Depends(auth.get_current_user),
+    media_type: str = "",
+    favorites: bool = False,
+    search: str = "",
+    limit: int = 500,
+):
+    items = db.get_library(
+        user["id"],
+        media_type=media_type or None,
+        favorites_only=bool(favorites),
+        search=search,
+        limit=max(1, min(int(limit or 500), 2000)),
+    )
+    return {"items": items, "stats": db.library_stats(user["id"])}
+
+
+@app.get("/api/library/{item_id}")
+def get_library_item(item_id: str, user: dict = Depends(auth.get_current_user)):
+    item = db.get_library_item(item_id, user_id=user["id"])
+    if not item:
+        raise HTTPException(404, "Not found")
+    return item
+
+
+@app.patch("/api/library/{item_id}")
+def patch_library_item(
+    item_id: str,
+    body: LibraryUpdateIn,
+    user: dict = Depends(auth.get_current_user),
+):
+    updated = db.update_library_item(
+        item_id, user["id"],
+        {"title": body.title, "tags": body.tags, "favorite": body.favorite},
+    )
+    if not updated:
+        raise HTTPException(404, "Not found")
+    return updated
+
+
+@app.delete("/api/library/{item_id}")
+def remove_library_item(item_id: str, user: dict = Depends(auth.get_current_user)):
+    removed = db.delete_library_item(
+        item_id, user_id=None if user["role"] == "admin" else user["id"]
+    )
+    if not removed:
+        raise HTTPException(404, "Not found or not allowed")
+    # Only unlink the file when no other library row references it.
+    url = removed.get("url") or ""
+    if url.startswith("/static/results/") and not db.library_url_in_use(url, exclude_id=item_id):
+        try:
+            (BASE / url.lstrip("/")).unlink(missing_ok=True)
+        except Exception:
+            pass
+    return {"ok": True}
+
+
+@app.post("/api/library/import")
+async def import_to_library(
+    user: dict = Depends(auth.get_current_user),
+    file: UploadFile = File(...),
+    title: str = Form(""),
+):
+    """Upload an external file straight into the library so it can seed a job."""
+    if not file or not file.filename:
+        raise HTTPException(400, "No file provided")
+    ext = Path(file.filename).suffix.lower() or ".bin"
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif",
+                   ".mp4", ".webm", ".mov", ".mp3", ".wav", ".m4a"):
+        raise HTTPException(400, f"Unsupported file type: {ext}")
+    lib_dir = BASE / "static" / "library"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    stem = "".join(c if c.isalnum() or c in "._-" else "_" for c in Path(file.filename).stem[:40])
+    name = f"{user['id'][:8]}_{uuid4().hex[:8]}_{stem}{ext}"
+    dest = lib_dir / name
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Empty file")
+    dest.write_bytes(content)
+    url = f"/static/library/{name}"
+    media = "video" if ext in (".mp4", ".webm", ".mov") else (
+        "audio" if ext in (".mp3", ".wav", ".m4a") else "image")
+    return db.add_library_item(
+        user_id=user["id"], url=url, media_type=media,
+        title=title or Path(file.filename).stem, source="uploaded",
+    )
+
+
 @app.delete("/api/jobs/{job_id}")
 def remove_job(job_id: str, user: dict = Depends(auth.get_current_user)):
     ok = db.delete_job(job_id, user_id=None if user["role"] == "admin" else user["id"])
@@ -555,6 +677,11 @@ def register_page(request: Request):
 @app.get("/generate", response_class=HTMLResponse)
 def generate_page(request: Request):
     return _page(request, "generate.html")
+
+
+@app.get("/library", response_class=HTMLResponse)
+def library_page(request: Request):
+    return _page(request, "library.html")
 
 
 @app.get("/jobs", response_class=HTMLResponse)

@@ -13,6 +13,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 USERS_FILE = DATA_DIR / "users.json"
 JOBS_FILE = DATA_DIR / "jobs.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
+LIBRARY_FILE = DATA_DIR / "library.json"
 
 _lock = threading.Lock()
 
@@ -278,3 +279,136 @@ def can_start_job(user_id: str, settings: Optional[dict] = None) -> tuple:
         return False, "queued"  # may wait
     return False, f"Concurrency limit reached ({active}/{max_c}, scope={scope}). Queue is disabled."
 
+
+
+# ─── Personal media library ───────────────────────────────────────────────────
+
+def get_library(
+    user_id: str,
+    media_type: Optional[str] = None,
+    favorites_only: bool = False,
+    search: str = "",
+    limit: int = 500,
+) -> list[dict]:
+    """Items owned by this user, newest first."""
+    with _lock:
+        items = _load(LIBRARY_FILE, [])
+    out = [i for i in items if i.get("user_id") == user_id and not i.get("deleted")]
+    if media_type in ("image", "video", "audio"):
+        out = [i for i in out if i.get("media_type") == media_type]
+    if favorites_only:
+        out = [i for i in out if i.get("favorite")]
+    term = (search or "").strip().lower()
+    if term:
+        out = [
+            i for i in out
+            if term in (i.get("prompt") or "").lower()
+            or term in (i.get("title") or "").lower()
+            or any(term in t.lower() for t in (i.get("tags") or []))
+        ]
+    out.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return out[:limit]
+
+
+def get_library_item(item_id: str, user_id: Optional[str] = None) -> Optional[dict]:
+    with _lock:
+        items = _load(LIBRARY_FILE, [])
+    for i in items:
+        if i.get("id") == item_id and not i.get("deleted"):
+            if user_id and i.get("user_id") != user_id:
+                return None
+            return i
+    return None
+
+
+def add_library_item(
+    user_id: str,
+    url: str,
+    media_type: str,
+    job_id: Optional[str] = None,
+    prompt: str = "",
+    title: str = "",
+    model: str = "",
+    params: Optional[dict] = None,
+    source: str = "generated",
+) -> dict:
+    """Record a media file in the user's library. Idempotent per (job_id, url)."""
+    with _lock:
+        items = _load(LIBRARY_FILE, [])
+        if job_id:
+            for existing in items:
+                if (
+                    existing.get("job_id") == job_id
+                    and existing.get("url") == url
+                    and not existing.get("deleted")
+                ):
+                    return existing
+        item = {
+            "id": str(uuid4()),
+            "user_id": user_id,
+            "job_id": job_id,
+            "url": url,
+            "media_type": media_type,
+            "title": (title or prompt[:60] or "Untitled").strip(),
+            "prompt": prompt or "",
+            "model": model or "",
+            "params": params or {},
+            "source": source,          # generated | uploaded
+            "tags": [],
+            "favorite": False,
+            "created_at": _now(),
+        }
+        items.append(item)
+        _save(LIBRARY_FILE, items)
+        return item
+
+
+def update_library_item(item_id: str, user_id: str, updates: dict) -> Optional[dict]:
+    allowed = {"title", "tags", "favorite"}
+    clean = {k: v for k, v in updates.items() if k in allowed and v is not None}
+    if not clean:
+        return get_library_item(item_id, user_id)
+    with _lock:
+        items = _load(LIBRARY_FILE, [])
+        for i, item in enumerate(items):
+            if item.get("id") == item_id and item.get("user_id") == user_id:
+                items[i].update(clean)
+                items[i]["updated_at"] = _now()
+                _save(LIBRARY_FILE, items)
+                return items[i]
+    return None
+
+
+def delete_library_item(item_id: str, user_id: Optional[str] = None) -> Optional[dict]:
+    """Soft-delete so a shared underlying file is never yanked from another row."""
+    with _lock:
+        items = _load(LIBRARY_FILE, [])
+        for i, item in enumerate(items):
+            if item.get("id") == item_id:
+                if user_id and item.get("user_id") != user_id:
+                    return None
+                items[i]["deleted"] = True
+                items[i]["deleted_at"] = _now()
+                _save(LIBRARY_FILE, items)
+                return items[i]
+    return None
+
+
+def library_url_in_use(url: str, exclude_id: str = "") -> bool:
+    """True if any live library row still points at this file."""
+    with _lock:
+        items = _load(LIBRARY_FILE, [])
+    return any(
+        i.get("url") == url and not i.get("deleted") and i.get("id") != exclude_id
+        for i in items
+    )
+
+
+def library_stats(user_id: str) -> dict:
+    items = get_library(user_id, limit=100000)
+    return {
+        "total": len(items),
+        "images": sum(1 for i in items if i.get("media_type") == "image"),
+        "videos": sum(1 for i in items if i.get("media_type") == "video"),
+        "favorites": sum(1 for i in items if i.get("favorite")),
+    }
