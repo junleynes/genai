@@ -29,6 +29,35 @@
         On the WanGP PC run e.g.
         <code class="text-[11px]">python -m http.server 8090 --directory C:\AI-Tools\Wan2GP\outputs</code>
         then set this to <code>http://WANGP_IP:8090</code>.
+        <strong>Required</strong> if your WanGP build has no gallery tools.
+      </p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1.5">Shared input folder (for image/video inputs)</label>
+      <input id="wan2gp_input_dir" value="{{ settings.wan2gp_input_dir or '' }}" placeholder="/mnt/wangp-inputs"
+        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
+      <p class="text-xs text-slate-400 mt-1">
+        Path <em>as this server sees it</em> (e.g. an SMB mount). Needed for i2i / i2v / v2v
+        when the WanGP build lacks <code>wangp_create_gallery_upload</code>.
+      </p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1.5">Shared input folder — WanGP-side path</label>
+      <input id="wan2gp_input_remote_prefix" value="{{ settings.wan2gp_input_remote_prefix or '' }}" placeholder="C:\AI-Tools\Wan2GP\inputs"
+        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
+      <p class="text-xs text-slate-400 mt-1">
+        The same folder <em>as WanGP sees it</em>. Files are copied to the folder above, then this path is sent.
+      </p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1.5">GenAI public base URL (alternative to shared folder)</label>
+      <input id="genai_public_base" value="{{ settings.genai_public_base or '' }}" placeholder="http://GENAI_HOST:8000"
+        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
+      <p class="text-xs text-slate-400 mt-1">
+        If set, input files are passed to WanGP as URLs on this server instead of being copied. WanGP must be able to reach it.
       </p>
     </div>
 
@@ -142,6 +171,9 @@ function payload() {
     max_concurrent_jobs: parseInt(document.getElementById('max_concurrent_jobs').value, 10) || 1,
     concurrent_scope: document.getElementById('concurrent_scope').value || 'overall',
     wan2gp_outputs_http_base: document.getElementById('wan2gp_outputs_http_base').value.trim(),
+    wan2gp_input_dir: document.getElementById('wan2gp_input_dir').value.trim(),
+    wan2gp_input_remote_prefix: document.getElementById('wan2gp_input_remote_prefix').value.trim(),
+    genai_public_base: document.getElementById('genai_public_base').value.trim(),
   };
 }
 
