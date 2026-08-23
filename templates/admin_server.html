@@ -38,8 +38,9 @@
       <input id="wan2gp_input_dir" value="{{ settings.wan2gp_input_dir or '' }}" placeholder="/mnt/wangp-inputs"
         class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
       <p class="text-xs text-slate-400 mt-1">
-        Path <em>as this server sees it</em> (e.g. an SMB mount). Needed for i2i / i2v / v2v
-        when the WanGP build lacks <code>wangp_create_gallery_upload</code>.
+        Path <em>as this server sees it</em> — e.g. <code>\\\\WANGP_IP\\wangp-inputs</code> on Windows,
+        or an SMB mount point on Linux. <strong>Required</strong> for i2i / i2v / ia2v / v2v when the
+        WanGP build lacks <code>wangp_create_gallery_upload</code>.
       </p>
     </div>
 
@@ -52,14 +53,7 @@
       </p>
     </div>
 
-    <div>
-      <label class="block text-sm font-medium mb-1.5">GenAI public base URL (alternative to shared folder)</label>
-      <input id="genai_public_base" value="{{ settings.genai_public_base or '' }}" placeholder="http://GENAI_HOST:8000"
-        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
-      <p class="text-xs text-slate-400 mt-1">
-        If set, input files are passed to WanGP as URLs on this server instead of being copied. WanGP must be able to reach it.
-      </p>
-    </div>
+
 
 
     <div>
@@ -173,7 +167,6 @@ function payload() {
     wan2gp_outputs_http_base: document.getElementById('wan2gp_outputs_http_base').value.trim(),
     wan2gp_input_dir: document.getElementById('wan2gp_input_dir').value.trim(),
     wan2gp_input_remote_prefix: document.getElementById('wan2gp_input_remote_prefix').value.trim(),
-    genai_public_base: document.getElementById('genai_public_base').value.trim(),
   };
 }
 

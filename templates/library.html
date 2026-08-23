@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}Library – {{ settings.app_name }}{% endblock %}
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-10">
+  <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+    <div>
+      <h1 class="text-3xl font-bold tracking-tight">Library</h1>
+      <p class="text-slate-500 dark:text-slate-400 mt-1">Everything you've generated, ready to reuse</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="btn-brand px-4 py-2 rounded-xl text-sm font-semibold cursor-pointer">
+        Import file
+        <input id="import-input" type="file" class="hidden"
+               accept="image/*,video/*,audio/*" />
+      </label>
+      <a href="/generate" class="px-4 py-2 rounded-xl text-sm font-semibold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">New generation</a>
+    </div>
+  </div>
+
+  <div id="stats" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6"></div>
+
+  <div class="flex flex-wrap items-center gap-2 mb-6">
+    <div class="flex rounded-xl border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+      <button data-filter="" class="filter-btn px-3 py-1.5">All</button>
+      <button data-filter="image" class="filter-btn px-3 py-1.5 border-l border-slate-300 dark:border-slate-700">Images</button>
+      <button data-filter="video" class="filter-btn px-3 py-1.5 border-l border-slate-300 dark:border-slate-700">Videos</button>
+      <button data-filter="fav" class="filter-btn px-3 py-1.5 border-l border-slate-300 dark:border-slate-700">★ Favorites</button>
+    </div>
+    <input id="search" type="search" placeholder="Search prompts, titles, tags…"
+      class="flex-1 min-w-[200px] px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm" />
+  </div>
+
+  <div id="grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    <p class="text-slate-500 col-span-full">Loading…</p>
+  </div>
+</div>
+
+<!-- Detail drawer -->
+<div id="drawer" class="hidden fixed inset-0 z-50">
+  <div class="absolute inset-0 bg-black/60" onclick="closeDrawer()"></div>
+  <div class="absolute right-0 inset-y-0 w-full max-w-md bg-white dark:bg-slate-900 shadow-xl overflow-y-auto">
+    <div id="drawer-body" class="p-5"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+if (!requireAuth()) throw new Error('auth');
+
+let ITEMS = [];
+let FILTER = '';
+let SEARCH = '';
+
+function qs(params) {
+  const p = new URLSearchParams();
+  if (params.media_type) p.set('media_type', params.media_type);
+  if (params.favorites) p.set('favorites', 'true');
+  if (params.search) p.set('search', params.search);
+  const s = p.toString();
+  return s ? '?' + s : '';
+}
+
+function statCard(label, value) {
+  return `<div class="rounded-xl border border-slate-200 dark:border-slate-800 p-3">
+    <div class="text-2xl font-bold">${value}</div>
+    <div class="text-xs text-slate-500 dark:text-slate-400">${label}</div>
+  </div>`;
+}
+
+function tile(it) {
+  const media = it.media_type === 'video'
+    ? `<video src="${it.url}" class="w-full h-40 object-cover bg-black" muted
+              onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0"></video>`
+    : it.media_type === 'audio'
+      ? `<div class="w-full h-40 flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-4xl">🎵</div>`
+      : `<img src="${it.url}" loading="lazy" class="w-full h-40 object-cover bg-slate-50 dark:bg-slate-950" />`;
+  return `<div class="group rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:shadow-lg transition">
+    <div class="relative cursor-pointer" onclick="openDrawer('${it.id}')">
+      ${media}
+      <button onclick="event.stopPropagation();toggleFav('${it.id}')"
+        class="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 text-white text-sm leading-none
+               ${it.favorite ? '' : 'opacity-0 group-hover:opacity-100'} transition">
+        ${it.favorite ? '★' : '☆'}
+      </button>
+      ${it.source === 'uploaded' ? '<span class="absolute top-2 left-2 text-[10px] px-1.5 py-0.5 rounded bg-black/50 text-white">imported</span>' : ''}
+    </div>
+    <div class="p-2.5">
+      <p class="text-xs font-medium truncate" title="${escapeHtml(it.title || '')}">${escapeHtml(it.title || 'Untitled')}</p>
+      <p class="text-[10px] text-slate-500 truncate">${new Date(it.created_at).toLocaleDateString()}</p>
+      <div class="flex gap-1 mt-2">
+        <button onclick="useIn('${it.id}')" class="flex-1 text-[11px] px-2 py-1 rounded-lg btn-brand font-semibold">Use</button>
+        <a href="${it.url}" download class="text-[11px] px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700">↓</a>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function load() {
+  const grid = document.getElementById('grid');
+  try {
+    const params = FILTER === 'fav'
+      ? { favorites: true, search: SEARCH }
+      : { media_type: FILTER, search: SEARCH };
+    const data = await API.get('/api/library' + qs(params));
+    ITEMS = data.items || [];
+    const s = data.stats || {};
+    document.getElementById('stats').innerHTML =
+      statCard('Total', s.total || 0) + statCard('Images', s.images || 0) +
+      statCard('Videos', s.videos || 0) + statCard('Favorites', s.favorites || 0);
+    grid.innerHTML = ITEMS.length
+      ? ITEMS.map(tile).join('')
+      : `<div class="col-span-full text-center py-16 text-slate-500">
+           <p class="text-4xl mb-3">🗂️</p>
+           <p>Nothing here yet. Generated media lands here automatically.</p>
+         </div>`;
+  } catch (e) {
+    grid.innerHTML = `<p class="text-red-500 col-span-full">${escapeHtml(e.message || 'Failed to load')}</p>`;
+  }
+}
+
+async function toggleFav(id) {
+  const it = ITEMS.find(x => x.id === id);
+  if (!it) return;
+  try {
+    await API.patch('/api/library/' + id, { favorite: !it.favorite });
+    it.favorite = !it.favorite;
+    load();
+  } catch (e) { toast(e.message || 'Failed', 'error'); }
+}
+
+async function removeItem(id) {
+  if (!confirm('Remove from library? The file will be deleted.')) return;
+  try {
+    await API.del('/api/library/' + id);
+    closeDrawer();
+    toast('Removed', 'success');
+    load();
+  } catch (e) { toast(e.message || 'Failed', 'error'); }
+}
+
+function useIn(id) {
+  const it = ITEMS.find(x => x.id === id);
+  if (!it) return;
+  // Generate page reads these and preloads the input.
+  sessionStorage.setItem('library_seed', JSON.stringify({
+    id: it.id, url: it.url, media_type: it.media_type, title: it.title,
+  }));
+  location.href = '/generate?from_library=' + encodeURIComponent(it.id);
+}
+
+function openDrawer(id) {
+  const it = ITEMS.find(x => x.id === id);
+  if (!it) return;
+  const p = it.params || {};
+  const rows = Object.entries(p).filter(([, v]) => v !== null && v !== '')
+    .map(([k, v]) => `<div class="flex justify-between gap-3 py-1 border-b border-slate-100 dark:border-slate-800">
+        <span class="text-slate-500">${escapeHtml(k)}</span>
+        <span class="font-mono text-right">${escapeHtml(String(v))}</span></div>`).join('');
+  const preview = it.media_type === 'video'
+    ? `<video src="${it.url}" controls class="w-full rounded-xl bg-black"></video>`
+    : it.media_type === 'audio'
+      ? `<audio src="${it.url}" controls class="w-full"></audio>`
+      : `<img src="${it.url}" class="w-full rounded-xl" />`;
+  document.getElementById('drawer-body').innerHTML = `
+    <div class="flex justify-between items-start mb-4">
+      <h2 class="text-lg font-bold pr-4">${escapeHtml(it.title || 'Untitled')}</h2>
+      <button onclick="closeDrawer()" class="text-2xl leading-none text-slate-400 hover:text-slate-600">×</button>
+    </div>
+    ${preview}
+    ${it.prompt ? `<div class="mt-4">
+      <p class="text-xs uppercase tracking-wide text-slate-400 mb-1">Prompt</p>
+      <p class="text-sm">${escapeHtml(it.prompt)}</p></div>` : ''}
+    ${it.model ? `<p class="text-xs text-slate-500 mt-3">Model: <span class="font-mono">${escapeHtml(it.model)}</span></p>` : ''}
+    ${rows ? `<div class="mt-4 text-xs">${rows}</div>` : ''}
+    <div class="flex gap-2 mt-5">
+      <button onclick="useIn('${it.id}')" class="flex-1 btn-brand px-3 py-2 rounded-xl text-sm font-semibold">Use in generation</button>
+      <a href="${it.url}" download class="px-3 py-2 rounded-xl text-sm border border-slate-300 dark:border-slate-700">Download</a>
+    </div>
+    <button onclick="removeItem('${it.id}')" class="w-full mt-2 px-3 py-2 rounded-xl text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950">Remove</button>`;
+  document.getElementById('drawer').classList.remove('hidden');
+}
+function closeDrawer() { document.getElementById('drawer').classList.add('hidden'); }
+
+document.querySelectorAll('.filter-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    FILTER = b.dataset.filter;
+    document.querySelectorAll('.filter-btn').forEach(x =>
+      x.classList.toggle('btn-brand', x.dataset.filter === FILTER));
+    load();
+  });
+});
+
+let searchTimer;
+document.getElementById('search').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { SEARCH = e.target.value.trim(); load(); }, 250);
+});
+
+document.getElementById('import-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    await API.postForm('/api/library/import', fd);
+    toast('Imported', 'success');
+    load();
+  } catch (err) { toast(err.message || 'Import failed', 'error'); }
+  e.target.value = '';
+});
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+
+document.querySelector('.filter-btn').classList.add('btn-brand');
+load();
+</script>
+{% endblock %}
