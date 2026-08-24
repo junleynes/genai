@@ -116,6 +116,7 @@ class ServerConfigIn(BaseModel):
     wan2gp_enabled: bool = False
     wan2gp_cli_args: str = "--attention sdpa --profile 4"
     default_model_type: str = "ltx2_22B_distilled"
+    default_image_model_type: str = "flux_dev"
     default_resolution: str = "1280x704"
     default_steps: int = 8
     default_guidance_scale: float = 7.5
@@ -215,6 +216,7 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "wan2gp_enabled": body.wan2gp_enabled,
         "wan2gp_cli_args": (body.wan2gp_cli_args or "").strip(),
         "default_model_type": (body.default_model_type or "").strip() or "ltx2_22B_distilled",
+        "default_image_model_type": (body.default_image_model_type or "").strip() or "flux_dev",
         "default_resolution": (body.default_resolution or "").strip() or "1280x704",
         "default_steps": int(body.default_steps or 8),
         "default_guidance_scale": float(body.default_guidance_scale or 7.5),

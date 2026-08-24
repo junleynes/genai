@@ -58,7 +58,10 @@ DEFAULT_SETTINGS = {
     "wan2gp_control_letters": "",  # same dir as WanGP sees it, e.g. C:\AI-Tools\Wan2GP\inputs
     "wan2gp_enabled": False,
     "wan2gp_cli_args": "--attention sdpa --profile 4",
-    "default_model_type": "ltx2_22B_distilled",
+    # Auto-model defaults. Kept separate per output medium: a single default
+    # meant an image job resolved to a video model and vice versa.
+    "default_model_type": "ltx2_22B_distilled",        # video jobs
+    "default_image_model_type": "flux_dev",            # image jobs (t2i / i2i)
     "default_resolution": "1280x704",
     "default_steps": 8,
     "default_fps": "24",

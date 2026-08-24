@@ -49,7 +49,17 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
 
     model = params.get("model_type") or params.get("model")
     if model in (None, "", "auto"):
-        model = defaults.get("model_type") or "ltx2_22B_distilled"
+        # Auto resolves per output medium — an image job must not inherit the
+        # video default (which would hand WanGP a model that can't do stills).
+        if jtype in ("t2i", "i2i"):
+            model = (
+                defaults.get("image_model_type")
+                or defaults.get("model_type")
+                or "flux_dev"
+            )
+        else:
+            model = defaults.get("model_type") or "ltx2_22B_distilled"
+        logger.info("Job %s: auto model -> %s (%s)", job.get("id"), model, jtype)
 
     resolution = params.get("resolution") or defaults.get("resolution") or "1280x704"
     steps = int(params.get("steps") or params.get("num_inference_steps") or defaults.get("num_inference_steps") or 8)
@@ -603,6 +613,7 @@ def _resolve_local_media(p: str | None) -> Optional[str]:
 def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
     defaults = {
         "model_type": settings_cfg.get("default_model_type") or "ltx2_22B_distilled",
+        "image_model_type": settings_cfg.get("default_image_model_type") or "flux_dev",
         "resolution": settings_cfg.get("default_resolution") or "1280x704",
         "num_inference_steps": settings_cfg.get("default_steps") or 8,
         "force_fps": settings_cfg.get("default_fps") or "24",
