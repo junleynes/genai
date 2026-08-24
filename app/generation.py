@@ -253,17 +253,26 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
 
     model = params.get("model_type") or params.get("model")
     if model in (None, "", "auto"):
-        # Auto resolves per output medium — an image job must not inherit the
-        # video default (which would hand WanGP a model that can't do stills).
-        if jtype in ("t2i", "i2i"):
-            model = (
-                defaults.get("image_model_type")
-                or defaults.get("model_type")
-                or "flux_dev"
-            )
+        # Auto resolves per job type first, then per output medium — an image
+        # job must not inherit the video default (which would hand WanGP a
+        # model that can't do stills), and job types with special needs
+        # (p2v=VACE, ia2v=audio-capable) need their own answer so Easy mode
+        # can hide the model picker entirely.
+        per_type = defaults.get(f"model_{jtype}")
+        if per_type:
+            model = per_type
+            logger.info("Job %s: auto model -> %s (per-job-type default for %s)",
+                        job.get("id"), model, jtype)
         else:
-            model = defaults.get("model_type") or "ltx2_22B_distilled"
-        logger.info("Job %s: auto model -> %s (%s)", job.get("id"), model, jtype)
+            if jtype in ("t2i", "i2i"):
+                model = (
+                    defaults.get("image_model_type")
+                    or defaults.get("model_type")
+                    or "flux_dev"
+                )
+            else:
+                model = defaults.get("model_type") or "ltx2_22B_distilled"
+            logger.info("Job %s: auto model -> %s (%s)", job.get("id"), model, jtype)
 
     resolution = params.get("resolution") or defaults.get("resolution") or "1280x704"
     steps = int(params.get("steps") or params.get("num_inference_steps") or defaults.get("num_inference_steps") or 8)
@@ -349,20 +358,26 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
                             ("control_end", "video_guide_end")):
             if params.get(key) is not None:
                 settings[target] = params[key]
-        loras_raw = params.get("loras")
-        if loras_raw:
-            lora_names, lora_multipliers = _parse_loras(str(loras_raw))
-            if lora_names:
-                settings["activated_loras"] = lora_names
-                settings["loras_multipliers"] = lora_multipliers
-                logger.info(
-                    "Job %s: activating LoRAs %s (multipliers=%s)",
-                    job.get("id"), lora_names, lora_multipliers,
-                )
         logger.info(
             "Job %s: %s-guided generation (video_prompt_type=%s)",
             job.get("id"), control_type, settings["video_prompt_type"],
         )
+
+    # ── LoRAs ─────────────────────────────────────────────────────────────
+    # Applies to every job type, not just guided ones. When the user picked
+    # none, fall back to the per-job-type default so Easy mode (where the
+    # LoRA picker is hidden) still gets the right ones automatically.
+    loras_raw = params.get("loras") or defaults.get(f"loras_{jtype}") or ""
+    if loras_raw:
+        lora_names, lora_multipliers = _parse_loras(str(loras_raw))
+        if lora_names:
+            settings["activated_loras"] = lora_names
+            settings["loras_multipliers"] = lora_multipliers
+            logger.info(
+                "Job %s: activating LoRAs %s (multipliers=%s)%s",
+                job.get("id"), lora_names, lora_multipliers,
+                "" if params.get("loras") else " [per-job-type default]",
+            )
 
     if jtype in ("t2i", "i2i"):
         settings["image_mode"] = 1
@@ -880,6 +895,14 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         "num_inference_steps": settings_cfg.get("default_steps") or 8,
         "force_fps": settings_cfg.get("default_fps") or "24",
     }
+    # Per-job-type model/LoRA defaults, so Easy mode can hide both pickers.
+    for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i"):
+        mv = (settings_cfg.get(f"default_model_{_jt}") or "").strip()
+        if mv:
+            defaults[f"model_{_jt}"] = mv
+        lv = (settings_cfg.get(f"default_loras_{_jt}") or "").strip()
+        if lv:
+            defaults[f"loras_{_jt}"] = lv
     source = _map_job_to_settings(job, defaults)
 
     # ── Guide-capable model enforcement ───────────────────────────────────

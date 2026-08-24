@@ -100,7 +100,7 @@
     <input type="hidden" name="job_type" id="job_type" value="t2v" />
     <input type="hidden" name="mode" id="mode" value="easy" />
 
-    <div>
+    <div class="adv-only">
       <label class="block text-sm font-medium mb-1.5">Model family</label>
       <select id="model-family" class="w-full mb-3 px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm">
         <option value="">All families</option>
@@ -111,6 +111,10 @@
       </select>
       <p id="model-hint" class="text-xs text-slate-400 mt-1">Models filtered for this mode via MCP wangp_list_models.</p>
     </div>
+
+    <p id="easy-model-note" class="text-xs text-slate-400 hidden">
+      Model and LoRAs are chosen automatically for this mode. Switch to Advanced to override.
+    </p>
 
 
     <div id="media-panel" class="grid sm:grid-cols-2 gap-4 hidden">
@@ -726,6 +730,22 @@ function updateUI() {
   document.getElementById('adv-panel').classList.toggle('hidden', currentMode !== 'advanced');
   if (typeof updatePresetSummary === 'function') updatePresetSummary();
   document.getElementById('neg-wrap').classList.toggle('hidden', currentMode !== 'advanced');
+
+  // Advanced-only controls (model pickers, control strength, LoRAs). The
+  // class existed in markup but was never toggled, so these were showing
+  // in Easy mode too — exactly the "which of 114 models?" confusion Easy
+  // mode is meant to avoid.
+  const isAdv = currentMode === 'advanced';
+  document.querySelectorAll('.adv-only').forEach(el => {
+    el.classList.toggle('hidden', !isAdv);
+  });
+  // In Easy mode the model select is hidden; force it back to Auto so a
+  // stale advanced pick can't silently ride along.
+  if (!isAdv) {
+    const msel = document.getElementById('model-select');
+    if (msel) msel.value = 'auto';
+  }
+  document.getElementById('easy-model-note')?.classList.toggle('hidden', isAdv);
   document.getElementById('easy-duration-wrap').classList.toggle('hidden', !isVideoOut());
   document.getElementById('adv-duration-wrap').classList.toggle('hidden', !isVideoOut());
 

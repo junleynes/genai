@@ -117,6 +117,20 @@ class ServerConfigIn(BaseModel):
     wan2gp_cli_args: str = "--attention sdpa --profile 4"
     default_model_type: str = "ltx2_22B_distilled"
     default_image_model_type: str = "flux_dev"
+    default_model_t2v: Optional[str] = None
+    default_model_i2v: Optional[str] = None
+    default_model_ia2v: Optional[str] = None
+    default_model_v2v: Optional[str] = None
+    default_model_p2v: Optional[str] = None
+    default_model_t2i: Optional[str] = None
+    default_model_i2i: Optional[str] = None
+    default_loras_t2v: Optional[str] = None
+    default_loras_i2v: Optional[str] = None
+    default_loras_ia2v: Optional[str] = None
+    default_loras_v2v: Optional[str] = None
+    default_loras_p2v: Optional[str] = None
+    default_loras_t2i: Optional[str] = None
+    default_loras_i2i: Optional[str] = None
     default_resolution: str = "1280x704"
     default_steps: int = 8
     default_guidance_scale: float = 7.5
@@ -219,6 +233,20 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "wan2gp_cli_args": (body.wan2gp_cli_args or "").strip(),
         "default_model_type": (body.default_model_type or "").strip() or "ltx2_22B_distilled",
         "default_image_model_type": (body.default_image_model_type or "").strip() or "flux_dev",
+        **{
+            f"default_model_{_jt}": (
+                (getattr(body, f"default_model_{_jt}") or "").strip()
+                if getattr(body, f"default_model_{_jt}") is not None else None
+            )
+            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i")
+        },
+        **{
+            f"default_loras_{_jt}": (
+                (getattr(body, f"default_loras_{_jt}") or "").strip()
+                if getattr(body, f"default_loras_{_jt}") is not None else None
+            )
+            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i")
+        },
         "default_resolution": (body.default_resolution or "").strip() or "1280x704",
         "default_steps": int(body.default_steps or 8),
         "default_guidance_scale": float(body.default_guidance_scale or 7.5),

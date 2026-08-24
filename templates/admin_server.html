@@ -121,6 +121,36 @@
           Used when Model is Auto on t2i / i2i jobs.
         </p>
       </div>
+
+    <details class="rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+      <summary class="text-sm font-medium cursor-pointer">
+        Per-job-type defaults <span class="font-normal text-slate-400">— what Easy mode uses</span>
+      </summary>
+      <p class="text-xs text-slate-400 mt-2 mb-3">
+        Easy mode hides the model and LoRA pickers entirely, so these decide what it runs.
+        Leave a row blank to fall back to the video/image defaults above. LoRAs use
+        <code>filename:weight, filename2:weight2</code> and must exist in WanGP's Loras folder
+        for that model. Pose-driven (p2v) additionally requires a VACE-style model — if the
+        model set here can't follow a guide, genai will substitute one that can.
+      </p>
+      <div class="space-y-3">
+        {% for jt, label in [
+          ('t2v','Text → Video'), ('i2v','Image → Video'), ('ia2v','Image+Audio → Video'),
+          ('v2v','Video → Video'), ('p2v','Pose-driven → Video'),
+          ('t2i','Text → Image'), ('i2i','Image → Image')
+        ] %}
+        <div class="grid grid-cols-[7rem_1fr_1fr] gap-2 items-center">
+          <span class="text-xs font-mono text-slate-500">{{ label }}</span>
+          <input id="default_model_{{ jt }}" value="{{ settings['default_model_' ~ jt] or '' }}"
+            placeholder="model_type (blank = default)"
+            class="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-xs" />
+          <input id="default_loras_{{ jt }}" value="{{ settings['default_loras_' ~ jt] or '' }}"
+            placeholder="lora.safetensors:1.0 (optional)"
+            class="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-xs" />
+        </div>
+        {% endfor %}
+      </div>
+    </details>
     <div class="grid grid-cols-2 gap-4">
       <div>
         <label class="block text-sm font-medium mb-1.5">Default resolution</label>
@@ -233,6 +263,12 @@ function payload() {
     wan2gp_cli_args: document.getElementById('wan2gp_cli_args').value.trim(),
     default_model_type: document.getElementById('default_model_type').value.trim(),
     default_image_model_type: document.getElementById('default_image_model_type').value.trim(),
+    ...Object.fromEntries(
+      ['t2v','i2v','ia2v','v2v','p2v','t2i','i2i'].flatMap(jt => [
+        ['default_model_' + jt, (document.getElementById('default_model_' + jt)?.value || '').trim()],
+        ['default_loras_' + jt, (document.getElementById('default_loras_' + jt)?.value || '').trim()],
+      ])
+    ),
     default_resolution: document.getElementById('default_resolution').value.trim(),
     default_steps: parseInt(document.getElementById('default_steps').value, 10) || 8,
     default_guidance_scale: parseFloat(document.getElementById('default_guidance_scale').value) || 7.5,

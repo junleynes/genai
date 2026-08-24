@@ -67,6 +67,27 @@ DEFAULT_SETTINGS = {
     # meant an image job resolved to a video model and vice versa.
     "default_model_type": "ltx2_22B_distilled",        # video jobs
     "default_image_model_type": "flux_dev",            # image jobs (t2i / i2i)
+    # Per-job-type overrides. Blank falls back to the medium defaults above.
+    # These exist so Easy mode can resolve a correct model with no user
+    # input: job types have genuinely different needs (p2v must be VACE,
+    # ia2v must be audio-capable, i2i must be edit-capable) that a single
+    # video/image split cannot express.
+    "default_model_t2v": "",
+    "default_model_i2v": "",
+    "default_model_ia2v": "",
+    "default_model_v2v": "",
+    "default_model_p2v": "",
+    "default_model_t2i": "",
+    "default_model_i2i": "",
+    # Default LoRAs per job type, "filename:weight, ..." — applied when the
+    # user supplied none, so Easy mode never has to think about LoRAs.
+    "default_loras_t2v": "",
+    "default_loras_i2v": "",
+    "default_loras_ia2v": "",
+    "default_loras_v2v": "",
+    "default_loras_p2v": "",
+    "default_loras_t2i": "",
+    "default_loras_i2i": "",
     "default_resolution": "1280x704",
     "default_steps": 8,
     "default_fps": "24",
