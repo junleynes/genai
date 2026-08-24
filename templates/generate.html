@@ -217,9 +217,11 @@
         <label class="block text-sm font-medium mb-1.5">Quality preset</label>
         <select id="easy-preset" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
           <option value="fast">Fast (480p, fewer steps)</option>
-          <option value="balanced" selected>Balanced (recommended)</option>
-          <option value="quality">High quality (more steps)</option>
+          <option value="balanced">Balanced</option>
+          <option value="quality">High quality (720p, more steps)</option>
+          <option value="broadcast">Broadcast (1080p, max steps)</option>
         </select>
+        <p id="preset-summary" class="text-xs text-slate-400 mt-1.5 font-mono"></p>
       </div>
       <div id="easy-duration-wrap">
         <label class="block text-sm font-medium mb-1.5">Duration</label>
@@ -237,18 +239,18 @@
           <label class="block text-sm font-medium mb-1.5">Resolution</label>
           <select name="resolution" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
             <option value="832x480">832×480 (low VRAM)</option>
-            <option value="1280x720" selected>1280×720</option>
-            <option value="1920x1080">1920×1080</option>
+            <option value="1280x720">1280×720</option>
+            <option value="1920x1080">1920×1080 (broadcast)</option>
             <option value="1024x1024">1024×1024 (image)</option>
           </select>
         </div>
         <div>
           <label class="block text-sm font-medium mb-1.5">Steps</label>
-          <input type="number" name="steps" value="20" min="1" max="100" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+          <input type="number" name="steps" value="{{ settings.default_steps or 20 }}" min="1" max="100" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
         </div>
         <div>
-          <label class="block text-sm font-medium mb-1.5">Guidance scale</label>
-          <input type="number" name="guidance_scale" value="7.5" min="0" max="30" step="0.5" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+          <label class="block text-sm font-medium mb-1.5">Guidance scale (CFG)</label>
+          <input type="number" name="guidance_scale" value="{{ settings.default_guidance_scale or 7.5 }}" min="0" max="30" step="0.5" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
         </div>
         <div>
           <label class="block text-sm font-medium mb-1.5">Seed (-1 = random)</label>
@@ -260,7 +262,7 @@
         </div>
         <div>
           <label class="block text-sm font-medium mb-1.5">FPS</label>
-          <input type="number" name="fps" value="16" min="8" max="30" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+          <input type="number" name="fps" value="{{ settings.default_fps or 24 }}" min="8" max="60" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
         </div>
       </div>
     </div>
@@ -423,6 +425,42 @@
 <script>
 let LIBRARY_SEED = null;
 let CONTROL_SEED = null;
+
+// ─── Quality presets ─────────────────────────────────────────────────────
+// Every preset states all four values so Easy mode sends a complete, explicit
+// configuration rather than leaving some fields to server-side defaults.
+const QUALITY_PRESETS = {
+  fast:      { video: '832x480',   image: '832x480',   steps: 15, guidance_scale: 6.0, fps: 16 },
+  balanced:  { video: '832x480',   image: '1024x1024', steps: 20, guidance_scale: 7.5, fps: 24 },
+  quality:   { video: '1280x720',  image: '1024x1024', steps: 30, guidance_scale: 7.5, fps: 24 },
+  broadcast: { video: '1920x1080', image: '1920x1080', steps: 40, guidance_scale: 8.0, fps: {{ settings.default_fps or 30 }} },
+};
+
+function presetValues(name) {
+  const p = QUALITY_PRESETS[name] || QUALITY_PRESETS.balanced;
+  return {
+    resolution: isVideoOut() ? p.video : p.image,
+    steps: p.steps,
+    guidance_scale: p.guidance_scale,
+    fps: p.fps,
+  };
+}
+
+function updatePresetSummary() {
+  const el = document.getElementById('preset-summary');
+  if (!el) return;
+  const sel = document.getElementById('easy-preset');
+  if (!sel) return;
+  const v = presetValues(sel.value);
+  // Spelled out so CFG and FPS aren't invisible in Easy mode.
+  el.textContent = isVideoOut()
+    ? `${v.resolution} · ${v.steps} steps · CFG ${v.guidance_scale} · ${v.fps} fps`
+    : `${v.resolution} · ${v.steps} steps · CFG ${v.guidance_scale}`;
+  el.title = 'Switch to Advanced to change these individually';
+}
+
+document.getElementById('easy-preset')?.addEventListener('change', updatePresetSummary);
+
 if (!requireAuth()) throw new Error('auth');
 
 let currentType = null;   // nothing chosen until a card is clicked
@@ -561,6 +599,7 @@ function updateUI() {
   document.getElementById('mode').value = currentMode;
   document.getElementById('easy-panel').classList.toggle('hidden', currentMode !== 'easy');
   document.getElementById('adv-panel').classList.toggle('hidden', currentMode !== 'advanced');
+  if (typeof updatePresetSummary === 'function') updatePresetSummary();
   document.getElementById('neg-wrap').classList.toggle('hidden', currentMode !== 'advanced');
   document.getElementById('easy-duration-wrap').classList.toggle('hidden', !isVideoOut());
   document.getElementById('adv-duration-wrap').classList.toggle('hidden', !isVideoOut());
@@ -714,14 +753,16 @@ document.getElementById('gen-form').addEventListener('submit', async (e) => {
   }
 
   if (currentMode === 'easy') {
-    const preset = document.getElementById('easy-preset').value;
-    let resolution = '832x480', steps = 20;
-    if (preset === 'fast') { resolution = '832x480'; steps = 15; }
-    else if (preset === 'balanced') { resolution = isVideoOut() ? '832x480' : '1024x1024'; steps = 20; }
-    else { resolution = isVideoOut() ? '1280x720' : '1024x1024'; steps = 30; }
-    fd.set('resolution', resolution);
-    fd.set('steps', String(steps));
-    if (isVideoOut()) fd.set('duration_seconds', document.getElementById('easy-duration').value);
+    const cfg = presetValues(document.getElementById('easy-preset').value);
+    fd.set('resolution', cfg.resolution);
+    fd.set('steps', String(cfg.steps));
+    // Easy mode previously sent neither of these, so the server fell back to
+    // its own defaults and the preset's quality intent was half-ignored.
+    fd.set('guidance_scale', String(cfg.guidance_scale));
+    if (isVideoOut()) {
+      fd.set('fps', String(cfg.fps));
+      fd.set('duration_seconds', document.getElementById('easy-duration').value);
+    }
   }
 
   try {
@@ -960,6 +1001,14 @@ function applyReusedJob(data) {
   return true;
 }
 
+(function initPreset() {
+  const sel = document.getElementById('easy-preset');
+  if (!sel) return;
+  const want = '{{ settings.default_quality_preset or "balanced" }}';
+  if ([...sel.options].some(o => o.value === want)) sel.value = want;
+  updatePresetSummary();
+})();
+
 (function initReuse() {
   const params = new URLSearchParams(location.search);
   if (!params.get('reuse')) return;
@@ -969,6 +1018,7 @@ function applyReusedJob(data) {
     if (data) applyReusedJob(data);
   } catch (_) {}
 })();
+
 
 </script>
 {% endblock %}
