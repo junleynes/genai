@@ -33,3 +33,25 @@ In **Admin → Wan2GP Server**, set MCP URL to `http://<host>:8080/mcp/` and ena
 ## Branding
 
 Change the visible app name under **Admin → Branding** (stored in settings; no code change needed).
+
+## Serving WanGP outputs (video/image files)
+
+WanGP's MCP server only exposes generation/job-management tools — it has
+no file-transfer capability. So genai fetches finished media over plain
+HTTP, from a small file server pointed at WanGP's `outputs/` folder:
+
+```bash
+python scripts/outputs_server.py --directory /path/to/WanGP/outputs --port 8090
+```
+
+Then set **Admin → Server & Queue → WanGP outputs HTTP base** to
+`http://<host>:8090`.
+
+This is a drop-in replacement for `python -m http.server 8090`, but it
+also supports HTTP Range requests (206 Partial Content). Plain
+`http.server` doesn't, which means browsers can't seek/scrub `<video>`
+playback and some players re-download the whole file just to jump
+forward a few seconds — with several jobs/library cards open at once
+this can make playback look stuck behind a single stream. `outputs_server.py`
+serves each request on its own thread and answers Range requests properly,
+so seeking only transfers the requested bytes.
