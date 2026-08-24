@@ -17,6 +17,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -536,22 +537,34 @@ def _stage_input_without_gallery(path: Path) -> str:
     """
     Expose a local input file to WanGP when the server has no upload tool.
 
-    Uses a folder both machines can see: we copy the file in, then hand WanGP
-    the path *as WanGP sees it*. Passing a URL instead does not work — WanGP
-    treats the value as a filesystem path and joins it onto its own working
-    directory, producing e.g. C:\\AI-Tools\\Wan2GP\\http:\\host\\file.jpg
-    and failing with Errno 22.
+    Two ways to get the file to WanGP:
+      1. HTTP upload to a scripts/inputs_server.py running on the WanGP
+         host (wan2gp_input_http_base) — works across machines with no
+         shared filesystem. Preferred when configured.
+      2. A folder both machines can see (wan2gp_input_dir / mounted
+         share) — we copy the file in, then hand WanGP the path as it
+         sees it. Passing a URL instead does not work — WanGP treats the
+         value as a filesystem path and joins it onto its own working
+         directory, producing e.g. C:\\AI-Tools\\Wan2GP\\http:\\host\\file.jpg
+         and failing with Errno 22.
     """
     settings = db.get_settings()
+
+    http_base = (settings.get("wan2gp_input_http_base") or "").strip().rstrip("/")
+    if http_base:
+        return _stage_input_via_http(path, http_base, settings)
+
     shared_dir = (settings.get("wan2gp_input_dir") or "").strip()
     remote_prefix = (settings.get("wan2gp_input_remote_prefix") or "").strip()
 
     if not shared_dir:
         raise RuntimeError(
             "This WanGP build has no wangp_create_gallery_upload tool, so input "
-            "media must go through a shared folder. Set 'Shared input folder' and "
-            "'Shared input folder — WanGP-side path' in Admin → Wan2GP Server. "
-            f"(file={path.name})"
+            "media must go through either an inputs_server.py upload URL or a "
+            "shared folder. Set 'Shared input folder — upload URL' (recommended "
+            "if genai and WanGP are on different machines), or 'Shared input "
+            "folder' + 'Shared input folder — WanGP-side path', in "
+            f"Admin → Wan2GP Server. (file={path.name})"
         )
 
     dest_dir = Path(shared_dir)
@@ -586,6 +599,42 @@ def _stage_input_without_gallery(path: Path) -> str:
         "sees the identical path.", dest
     )
     return str(dest)
+
+
+def _stage_input_via_http(path: Path, http_base: str, settings: dict) -> str:
+    """
+    Upload a local input file to a companion scripts/inputs_server.py
+    running on the WanGP host, and return the absolute path it reports
+    back — the path WanGP itself will see. Used when genai and WanGP are
+    on different machines with no mounted shared folder between them.
+    """
+    token = (settings.get("wan2gp_input_http_token") or "").strip()
+    headers = {}
+    if token:
+        headers["X-Auth-Token"] = token
+
+    data = path.read_bytes()
+    url = f"{http_base}/{quote(path.name)}"
+    try:
+        with httpx.Client(timeout=120.0) as client:
+            resp = client.put(url, content=data, headers=headers)
+    except Exception as e:
+        raise RuntimeError(f"could not reach input upload server at {http_base}: {e}")
+
+    if resp.status_code >= 400:
+        raise RuntimeError(
+            f"input upload to {http_base} failed: HTTP {resp.status_code} {resp.text[:300]}"
+        )
+    try:
+        body = resp.json()
+    except Exception:
+        raise RuntimeError(f"input upload to {http_base}: bad response {resp.text[:300]}")
+
+    remote_path = body.get("path")
+    if not remote_path:
+        raise RuntimeError(f"input upload to {http_base}: no path in response {body}")
+    logger.info("Staged input for WanGP via HTTP at %s", remote_path)
+    return remote_path
 
 
 def _resolve_local_media(p: str | None) -> Optional[str]:

@@ -53,6 +53,11 @@ DEFAULT_SETTINGS = {
     # Input staging for WanGP builds with no wangp_create_gallery_upload tool
     "wan2gp_input_dir": "",            # local/mounted dir both servers can see
     "wan2gp_input_remote_prefix": "",
+    # Cross-host alternative to the mounted-share fields above: point at a
+    # scripts/inputs_server.py instance running on the WanGP host and genai
+    # uploads input files to it over HTTP instead of needing a shared mount.
+    "wan2gp_input_http_base": "",   # e.g. http://WANGP_HOST:8091
+    "wan2gp_input_http_token": "",  # optional, must match inputs_server.py --token
     # Override VACE guide letters if your WanGP build uses a different alphabet,
     # e.g. "pose=P,depth=D,canny=E". Empty uses the built-in defaults.
     "wan2gp_control_letters": "",  # same dir as WanGP sees it, e.g. C:\AI-Tools\Wan2GP\inputs

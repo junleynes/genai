@@ -130,6 +130,8 @@ class ServerConfigIn(BaseModel):
     wan2gp_outputs_http_base: Optional[str] = None
     wan2gp_input_dir: Optional[str] = None
     wan2gp_input_remote_prefix: Optional[str] = None
+    wan2gp_input_http_base: Optional[str] = None
+    wan2gp_input_http_token: Optional[str] = None
     wan2gp_control_letters: Optional[str] = None
 
 
@@ -240,6 +242,14 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "wan2gp_input_remote_prefix": (
             body.wan2gp_input_remote_prefix.strip()
             if body.wan2gp_input_remote_prefix is not None else None
+        ),
+        "wan2gp_input_http_base": (
+            body.wan2gp_input_http_base.strip().rstrip("/")
+            if body.wan2gp_input_http_base is not None else None
+        ),
+        "wan2gp_input_http_token": (
+            body.wan2gp_input_http_token.strip()
+            if body.wan2gp_input_http_token is not None else None
         ),
         "wan2gp_control_letters": (
             body.wan2gp_control_letters.strip()

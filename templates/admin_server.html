@@ -34,13 +34,37 @@
     </div>
 
     <div>
-      <label class="block text-sm font-medium mb-1.5">Shared input folder (for image/video inputs)</label>
+      <label class="block text-sm font-medium mb-1.5">Shared input folder — upload URL <span class="font-normal text-slate-400">(recommended if WanGP is on a different machine)</span></label>
+      <input id="wan2gp_input_http_base" value="{{ settings.wan2gp_input_http_base or '' }}" placeholder="http://WANGP_HOST:8091"
+        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
+      <p class="text-xs text-slate-400 mt-1">
+        Uploads input files over HTTP to <code>scripts/inputs_server.py</code> running on the WanGP host —
+        no shared/mounted folder needed between the two machines. On the WanGP PC run e.g.
+        <code class="text-[11px]">python scripts/inputs_server.py --directory C:\AI-Tools\Wan2GP\inputs --port 8091</code>
+        then set this to <code>http://WANGP_IP:8091</code>. Takes priority over the mounted-folder fields
+        below when set. <strong>Required</strong> for i2i / i2v / ia2v / v2v when the WanGP build lacks
+        <code>wangp_create_gallery_upload</code> and genai isn't on the same machine as WanGP.
+      </p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1.5">Shared input folder — upload token <span class="font-normal text-slate-400">(optional)</span></label>
+      <input id="wan2gp_input_http_token" value="{{ settings.wan2gp_input_http_token or '' }}" placeholder="leave blank if inputs_server.py has no --token"
+        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
+      <p class="text-xs text-slate-400 mt-1">
+        Must match the <code>--token</code> value passed to <code>inputs_server.py</code>, if any.
+      </p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1.5">Shared input folder (mounted-share fallback)</label>
       <input id="wan2gp_input_dir" value="{{ settings.wan2gp_input_dir or '' }}" placeholder="/mnt/wangp-inputs"
         class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
       <p class="text-xs text-slate-400 mt-1">
-        Path <em>as this server sees it</em> — e.g. <code>\\\\WANGP_IP\\wangp-inputs</code> on Windows,
-        or an SMB mount point on Linux. <strong>Required</strong> for i2i / i2v / ia2v / v2v when the
-        WanGP build lacks <code>wangp_create_gallery_upload</code>.
+        Only used when no upload URL above is set. Must be a path <em>as this server sees it</em> that is
+        actually a mounted share reachable from both machines — e.g. <code>\\\\WANGP_IP\\wangp-inputs</code> on
+        Windows, or an SMB/NFS mount point on Linux. If genai and WanGP are on different hosts and nothing
+        is mounted here, this will fail with "not accessible or writable" — use the upload URL above instead.
       </p>
     </div>
 
@@ -60,7 +84,8 @@
       <input id="wan2gp_input_remote_prefix" value="{{ settings.wan2gp_input_remote_prefix or '' }}" placeholder="C:\AI-Tools\Wan2GP\inputs"
         class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
       <p class="text-xs text-slate-400 mt-1">
-        The same folder <em>as WanGP sees it</em>. Files are copied to the folder above, then this path is sent.
+        Only used with the mounted-share fallback above. The same folder <em>as WanGP sees it</em>.
+        Files are copied to the folder above, then this path is sent.
       </p>
     </div>
 
@@ -219,6 +244,8 @@ function payload() {
     wan2gp_outputs_http_base: document.getElementById('wan2gp_outputs_http_base').value.trim(),
     wan2gp_input_dir: document.getElementById('wan2gp_input_dir').value.trim(),
     wan2gp_input_remote_prefix: document.getElementById('wan2gp_input_remote_prefix').value.trim(),
+    wan2gp_input_http_base: document.getElementById('wan2gp_input_http_base').value.trim(),
+    wan2gp_input_http_token: document.getElementById('wan2gp_input_http_token').value.trim(),
     wan2gp_control_letters: document.getElementById('wan2gp_control_letters').value.trim(),
   };
 }
