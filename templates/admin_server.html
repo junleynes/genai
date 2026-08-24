@@ -74,17 +74,26 @@
       <p class="text-xs text-slate-400 mt-1">Folder that contains <code>wgp.py</code> and <code>shared/api.py</code>. Same machine as this app.</p>
     </div>
     <div>
-      <label class="block text-sm font-medium mb-1.5">Default model_type</label>
-      <input name="default_model_type" id="default_model_type" value="{{ settings.default_model_type or 'ltx2_22B_distilled' }}"
-        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
-      <p class="text-xs text-slate-400 mt-1">Must match a model id available in your WanGP install (export settings from UI for exact id).</p>
+      <div class="flex items-center justify-between mb-1.5">
+        <label class="block text-sm font-medium">Default model — video</label>
+        <button type="button" id="reload-models" class="text-xs text-brand hover:underline">Reload list</button>
+      </div>
+      <select id="default_model_type"
+        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm">
+        <option value="{{ settings.default_model_type or 'ltx2_22B_distilled' }}">{{ settings.default_model_type or 'ltx2_22B_distilled' }}</option>
+      </select>
+      <p class="text-xs text-slate-400 mt-1" id="video-model-hint">
+        Used when Model is Auto on t2v / i2v / ia2v / v2v / p2v jobs.
+      </p>
     </div>
       <div>
         <label class="block text-sm font-medium mb-1.5">Default model — images</label>
-        <input id="default_image_model_type" value="{{ settings.default_image_model_type or 'flux_dev' }}"
-          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
-        <p class="text-xs text-slate-400 mt-1">
-          Used when Model is set to Auto on a Text→Image or Image→Image job. The field above applies to video jobs.
+        <select id="default_image_model_type"
+          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm">
+          <option value="{{ settings.default_image_model_type or 'flux_dev' }}">{{ settings.default_image_model_type or 'flux_dev' }}</option>
+        </select>
+        <p class="text-xs text-slate-400 mt-1" id="image-model-hint">
+          Used when Model is Auto on t2i / i2i jobs.
         </p>
       </div>
     <div class="grid grid-cols-2 gap-4">
@@ -243,5 +252,75 @@ document.getElementById('test-btn').addEventListener('click', async () => {
     el.textContent = '✗ ' + err.message;
   }
 });
+// ─── Model dropdowns ─────────────────────────────────────────────────────
+// Populated from the same /api/models the Create page uses, so the ids here
+// are guaranteed to be strings WanGP actually accepts. The saved value is
+// preserved even if the server is unreachable or the model has since been
+// removed — losing a valid setting because the list failed to load would be
+// worse than showing an unverified value.
+async function fillModelSelect(selectId, jobType, hintId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const current = sel.value;
+  const hint = hintId ? document.getElementById(hintId) : null;
+
+  sel.disabled = true;
+  const prevHint = hint ? hint.textContent : '';
+  if (hint) hint.textContent = 'Loading models…';
+
+  try {
+    const data = await API.get('/api/models?job_type=' + encodeURIComponent(jobType));
+    const models = (data && data.models) || [];
+    if (!data.ok || !models.length) {
+      if (hint) {
+        hint.textContent = (data && data.message)
+          ? `Could not load models: ${data.message}`
+          : 'No models returned — keeping the saved value.';
+      }
+      return;                       // leave the existing single option in place
+    }
+
+    sel.innerHTML = '';
+    let matched = false;
+    for (const m of models) {
+      const id = m.model_type || m.model || m.id;
+      if (!id) continue;
+      const o = document.createElement('option');
+      o.value = id;
+      const name = m.name && m.name !== id ? ` — ${m.name}` : '';
+      o.textContent = id + name;
+      if (id === current) { o.selected = true; matched = true; }
+      sel.appendChild(o);
+    }
+    if (!matched && current) {
+      // Saved model isn't in the current list; keep it selectable and say so.
+      const o = document.createElement('option');
+      o.value = current;
+      o.textContent = current + ' (not in server list)';
+      o.selected = true;
+      sel.insertBefore(o, sel.firstChild);
+      if (hint) {
+        hint.textContent = `Saved model "${current}" wasn't returned by the server — it may have been removed.`;
+        return;
+      }
+    }
+    if (hint) hint.textContent = `${models.length} model(s) available. ${prevHint}`;
+  } catch (e) {
+    if (hint) hint.textContent = 'Could not reach the server — keeping the saved value.';
+  } finally {
+    sel.disabled = false;
+  }
+}
+
+async function loadAdminModels() {
+  await Promise.all([
+    fillModelSelect('default_model_type', 't2v', 'video-model-hint'),
+    fillModelSelect('default_image_model_type', 't2i', 'image-model-hint'),
+  ]);
+}
+
+document.getElementById('reload-models')?.addEventListener('click', loadAdminModels);
+loadAdminModels();
+
 </script>
 {% endblock %}
