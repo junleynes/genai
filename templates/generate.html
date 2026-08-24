@@ -159,6 +159,17 @@
             Higher follows the driving motion more strictly; lower gives the model more freedom.
           </p>
         </div>
+
+        <div class="mt-4 adv-only">
+          <label class="block text-sm font-medium mb-1.5">LoRAs (optional)</label>
+          <textarea name="loras" id="loras-input" rows="2" placeholder="lora-file-name.safetensors:1.0, other-lora.safetensors:0.8"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-xs"></textarea>
+          <p class="text-xs text-slate-400 mt-1">
+            One or more LoRAs to activate for this pose-driven generation, as <code>filename:weight</code>
+            pairs separated by commas or newlines. Weight defaults to 1.0 if omitted. Filenames must match
+            what WanGP shows in its Loras list for the selected model.
+          </p>
+        </div>
       </div>
 
       <div id="image-wrap" class="hidden">

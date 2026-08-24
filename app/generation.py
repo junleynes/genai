@@ -43,6 +43,37 @@ def _duration_to_frames(seconds: float, fps: int = 24) -> int:
     return max(5, (n // 4) * 4 + 1)
 
 
+def _parse_loras(raw: str) -> tuple[list[str], str]:
+    """
+    Parse a "filename:weight, filename2:weight2" string (commas and/or
+    newlines as separators) into WanGP's expected pair: a list of LoRA
+    filenames for `activated_loras`, and a space-separated string of
+    matching weights for `loras_multipliers`. Weight defaults to 1.0 when
+    omitted. Blank/whitespace-only entries are ignored.
+    """
+    names: list[str] = []
+    weights: list[float] = []
+    if not raw:
+        return names, ""
+    parts = [p.strip() for p in raw.replace("\n", ",").split(",") if p.strip()]
+    for part in parts:
+        if ":" in part:
+            name, w = part.rsplit(":", 1)
+            name = name.strip()
+            try:
+                weight = float(w.strip())
+            except ValueError:
+                weight = 1.0
+        else:
+            name, weight = part, 1.0
+        if not name:
+            continue
+        names.append(name)
+        weights.append(weight)
+    multipliers = " ".join(str(w) for w in weights)
+    return names, multipliers
+
+
 def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     params = job.get("params") or {}
     jtype = job.get("job_type", "t2v")
@@ -146,6 +177,16 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
                             ("control_end", "video_guide_end")):
             if params.get(key) is not None:
                 settings[target] = params[key]
+        loras_raw = params.get("loras")
+        if loras_raw:
+            lora_names, lora_multipliers = _parse_loras(str(loras_raw))
+            if lora_names:
+                settings["activated_loras"] = lora_names
+                settings["loras_multipliers"] = lora_multipliers
+                logger.info(
+                    "Job %s: activating LoRAs %s (multipliers=%s)",
+                    job.get("id"), lora_names, lora_multipliers,
+                )
         logger.info(
             "Job %s: %s-guided generation (video_prompt_type=%s)",
             job.get("id"), control_type, settings["video_prompt_type"],

@@ -474,6 +474,7 @@ async def create_job(
     control_type: str = Form("pose"),
     control_strength: Optional[float] = Form(None),
     control_video_library_id: str = Form(""),
+    loras: str = Form(""),
     # Reuse existing library media instead of uploading (ids from /api/library)
     image_library_id: str = Form(""),
     audio_library_id: str = Form(""),
@@ -559,6 +560,7 @@ async def create_job(
         "control_video_url": control_video_url,
         "control_type": control_type if control_video_url else None,
         "control_strength": control_strength,
+        "loras": loras.strip() if control_video_url else "",
     }
     if mode == "easy":
         # Ceiling is a guard against runaway values, not a quality cap —
