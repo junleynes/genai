@@ -114,7 +114,7 @@ function renderNav() {
       }
     } else {
       html += `<a href="/?login=1" class="sidebar-link flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"><span>→</span><span>Log in</span></a>`;
-      html += navLink('/register', 'Sign up', '+');
+      html += `<a href="/?register=1" class="sidebar-link flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"><span>+</span><span>Sign up</span></a>`;
     }
     side.innerHTML = html;
   }
@@ -131,7 +131,7 @@ function renderNav() {
     } else {
       sideAuth.innerHTML = `
         <a href="/?login=1" class="block text-center text-sm px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 mb-2">Log in</a>
-        <a href="/register" class="block text-center text-sm px-3 py-2 rounded-lg btn-brand">Sign up</a>
+        <a href="/?register=1" class="block text-center text-sm px-3 py-2 rounded-lg btn-brand">Sign up</a>
       `;
     }
   }
@@ -173,6 +173,33 @@ function closeLoginModal() {
   document.body.classList.remove('overflow-hidden');
 }
 
+function openRegisterModal(next) {
+  const modal = document.getElementById('register-modal');
+  if (!modal) return;
+  if (next) modal.dataset.next = next;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  document.body.classList.add('overflow-hidden');
+  modal.querySelector('input[name="name"]')?.focus();
+}
+
+function closeRegisterModal() {
+  const modal = document.getElementById('register-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  document.body.classList.remove('overflow-hidden');
+}
+
+function switchAuthModal(target) {
+  const next = document.getElementById('login-modal')?.dataset.next
+    || document.getElementById('register-modal')?.dataset.next;
+  closeLoginModal();
+  closeRegisterModal();
+  if (target === 'register') openRegisterModal(next);
+  else openLoginModal(next);
+}
+
 function initLoginModal() {
   const modal = document.getElementById('login-modal');
   const form = document.getElementById('login-modal-form');
@@ -205,6 +232,41 @@ function initLoginModal() {
   const params = new URLSearchParams(location.search);
   if (params.get('login') === '1') {
     openLoginModal(params.get('next') || '');
+  }
+}
+
+function initRegisterModal() {
+  const modal = document.getElementById('register-modal');
+  const form = document.getElementById('register-modal-form');
+  if (!modal || !form) return;
+
+  document.getElementById('register-modal-close')?.addEventListener('click', closeRegisterModal);
+  document.getElementById('register-modal-backdrop')?.addEventListener('click', closeRegisterModal);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeRegisterModal();
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    try {
+      const data = await API.post('/api/auth/register', {
+        name: fd.get('name'),
+        email: fd.get('email'),
+        password: fd.get('password'),
+      });
+      setAuth(data.token, data.user);
+      toast('Account created', 'success');
+      const next = modal.dataset.next || '/generate';
+      window.location.href = next;
+    } catch (err) {
+      toast(err.message || 'Registration failed', 'error');
+    }
+  });
+
+  const params = new URLSearchParams(location.search);
+  if (params.get('register') === '1') {
+    openRegisterModal(params.get('next') || '');
   }
 }
 
@@ -318,4 +380,5 @@ document.addEventListener('DOMContentLoaded', () => {
   renderNav();
   initSidebarMobile();
   initLoginModal();
+  initRegisterModal();
 });

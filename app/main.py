@@ -724,7 +724,10 @@ def login_page(request: Request):
 
 @app.get("/register", response_class=HTMLResponse)
 def register_page(request: Request):
-    return _page(request, "register.html")
+    # Signup is a popup on the landing page only — same treatment as /login.
+    next_url = request.query_params.get("next", "")
+    qs = f"?register=1&next={next_url}" if next_url else "?register=1"
+    return RedirectResponse(url=f"/{qs}")
 
 
 @app.get("/generate", response_class=HTMLResponse)
