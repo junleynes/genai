@@ -526,9 +526,12 @@ function fillModelSelect(models) {
   if (hint) {
     const total = (models || []).length;
     const shown = list.length;
-    hint.textContent = family
+    const suffix = currentType === 'p2v'
+      ? ' — only VACE-style models can follow a driving video'
+      : '';
+    hint.textContent = (family
       ? (shown + ' of ' + total + ' model(s) in family “' + family + '” for ' + currentType)
-      : (total + ' model(s) for ' + currentType);
+      : (total + ' model(s) for ' + currentType)) + suffix;
     hint.className = 'text-xs text-slate-400 flex-1';
   }
 }

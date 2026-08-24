@@ -43,6 +43,70 @@ def _duration_to_frames(seconds: float, fps: int = 24) -> int:
     return max(5, (n // 4) * 4 + 1)
 
 
+def _is_control_capable(model_type: str, name: str = "", family: str = "") -> bool:
+    """
+    Can this model consume a VACE-style guide video (video_guide +
+    video_prompt_type letters)?
+
+    Pose/depth/edge control is a VACE/Wan-family feature. LTX2, plain
+    Wan t2v/i2v, Hunyuan etc. accept the parameters silently and then
+    ignore them — generation "succeeds" but never follows the guide,
+    which looks exactly like pose control being broken. So we have to
+    identify guide-capable models explicitly rather than assume.
+    """
+    blob = f"{model_type} {name} {family}".lower()
+    # Architectures that actually implement guide conditioning.
+    if any(k in blob for k in (
+        "vace",      # VACE + VACE Lynx: the main control family
+        "control",   # generic controlnet-style finetunes
+        "fun",       # Wan-Fun control variants
+        "animate",   # Wan 2.2 Animate (character animation from a driving video)
+        "scail",     # Scail / Scail-2 character animators
+        "recam",     # ReCamMaster: re-shoot along a guide
+        "phantom",   # Phantom: reference/guide conditioning
+    )):
+        return True
+    return False
+
+
+def _pick_control_model(mcp_url: str, requested: str | None = None) -> Optional[str]:
+    """
+    Choose a guide-capable model for pose/control-driven jobs. Returns
+    None if the catalogue has none, so the caller can fail with a clear
+    message instead of silently generating unguided video.
+    """
+    try:
+        models = list_models_for_job_type(mcp_url, "p2v", limit=200)
+    except Exception:
+        logger.exception("could not list models to resolve a control-capable model")
+        return None
+
+    capable = [
+        m for m in models
+        if _is_control_capable(m.get("model_type", ""), m.get("name", ""), m.get("family", ""))
+    ]
+    if not capable:
+        return None
+
+    # Honour an explicit request when it is genuinely capable.
+    if requested:
+        for m in capable:
+            if m.get("model_type") == requested:
+                return requested
+
+    # Prefer VACE proper, then other control families.
+    def rank(m: dict) -> int:
+        blob = f"{m.get('model_type','')} {m.get('name','')} {m.get('family','')}".lower()
+        if "vace" in blob:
+            return 3
+        if "animate" in blob or "scail" in blob:
+            return 2
+        return 1
+
+    best = sorted(capable, key=rank, reverse=True)[0]
+    return best.get("model_type")
+
+
 def _parse_loras(raw: str) -> tuple[list[str], str]:
     """
     Parse a "filename:weight, filename2:weight2" string (commas and/or
@@ -709,6 +773,42 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         "force_fps": settings_cfg.get("default_fps") or "24",
     }
     source = _map_job_to_settings(job, defaults)
+
+    # ── Guide-capable model enforcement ───────────────────────────────────
+    # A guide video only does anything on a VACE-style model. "Auto" used to
+    # fall through to default_model_type (an LTX2 build), which accepts
+    # video_guide/video_prompt_type and then ignores them — the job succeeds
+    # but the output never follows the pose. Resolve to a capable model here,
+    # or fail loudly rather than silently returning unguided video.
+    if source.get("video_guide"):
+        params = job.get("params") or {}
+        requested = params.get("model_type") or params.get("model")
+        explicit = bool(requested) and requested not in ("auto", "")
+        current = str(source.get("model_type") or "")
+
+        if not _is_control_capable(current):
+            picked = _pick_control_model(mcp_url, requested if explicit else None)
+            if picked and picked != current:
+                if explicit:
+                    raise RuntimeError(
+                        f"Model '{current}' cannot follow a driving video — "
+                        "pose/depth/edge control needs a VACE-style model "
+                        f"(e.g. '{picked}'). Pick one on the Generate page, or "
+                        "set Model to Auto."
+                    )
+                logger.info(
+                    "Job %s: '%s' is not guide-capable; using '%s' for %s control",
+                    job.get("id"), current, picked,
+                    (job.get("params") or {}).get("control_type") or "pose",
+                )
+                source["model_type"] = picked
+            elif not picked:
+                raise RuntimeError(
+                    "No VACE/control-capable model is available on this WanGP "
+                    "install, so a driving video cannot be used. Install a VACE "
+                    "model (e.g. Wan 2.1/2.2 VACE) and try again."
+                )
+
     for key in (
         "image_start", "image_end", "image_refs",
         "video_source", "video_guide", "audio_guide", "audio_guide2",
@@ -2162,6 +2262,27 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
             wants, job_type, len(models),
         )
         matching = list(models)
+
+    # Pose/control jobs are a hard filter, not a preference: a non-VACE model
+    # accepts the guide parameters and silently ignores them, so offering one
+    # in the dropdown just produces confusingly unguided output. Only narrow
+    # if we actually found capable models, so an unusual catalogue still
+    # leaves the page usable.
+    if job_type == "p2v":
+        capable = [
+            m for m in matching
+            if _is_control_capable(
+                m.get("model_type", ""), m.get("name", ""), m.get("family", "")
+            )
+        ]
+        if capable:
+            matching = capable
+        else:
+            logger.warning(
+                "No guide-capable (VACE-style) models found among %d candidates; "
+                "pose control will not work with any of them",
+                len(matching),
+            )
 
     ranked = sorted(matching, key=score, reverse=True)
     positive = [m for m in ranked if score(m) > 0]
