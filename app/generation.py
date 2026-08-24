@@ -2031,7 +2031,38 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
                 s += 2
         return s
 
-    ranked = sorted(models, key=score, reverse=True)
+    # Hard filter on output media: an image job must never be offered a
+    # video model (and vice versa). Scoring alone only pushed them down the
+    # list, so they still appeared and could be picked by mistake.
+    wants = "image" if job_type in ("t2i", "i2i") else "video"
+
+    def produces(m: dict) -> Optional[str]:
+        mo = [str(x).lower() for x in (m.get("main_output") or [])]
+        if mo:
+            if "video" in mo:
+                return "video"
+            if "image" in mo:
+                return "image"
+            return mo[0]
+        # No declared output — infer from naming rather than dropping it.
+        blob = f"{m.get('model_type','')} {m.get('name','')} {m.get('family','')}".lower()
+        if any(k in blob for k in ("2v", "video", "vace", "wan", "ltx", "hunyuan", "mochi")):
+            return "video"
+        if any(k in blob for k in ("2i", "image", "flux", "qwen", "sdxl", "sd3", "chroma")):
+            return "image"
+        return None  # unknown: keep it rather than hide a usable model
+
+    matching = [m for m in models if produces(m) in (wants, None)]
+    if not matching:
+        # Nothing matched — surface everything rather than an empty dropdown,
+        # so a mislabelled catalogue doesn't make the page unusable.
+        logger.warning(
+            "No %s-output models found for job_type=%s; showing all %d",
+            wants, job_type, len(models),
+        )
+        matching = list(models)
+
+    ranked = sorted(matching, key=score, reverse=True)
     positive = [m for m in ranked if score(m) > 0]
     return positive if positive else ranked
 
