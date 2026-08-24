@@ -62,6 +62,9 @@ DEFAULT_SETTINGS = {
     "default_resolution": "1280x704",
     "default_steps": 8,
     "default_fps": "24",
+    "default_guidance_scale": 7.5,
+    # Quality preset preselected in Easy mode: fast | balanced | quality | broadcast
+    "default_quality_preset": "balanced",
     "allow_mock_fallback": False,
     # Job queue
     "queue_enabled": True,

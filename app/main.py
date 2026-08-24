@@ -118,6 +118,8 @@ class ServerConfigIn(BaseModel):
     default_model_type: str = "ltx2_22B_distilled"
     default_resolution: str = "1280x704"
     default_steps: int = 8
+    default_guidance_scale: float = 7.5
+    default_quality_preset: str = "balanced"
     allow_mock_fallback: bool = False
     queue_enabled: bool = True
     max_concurrent_jobs: int = 1
@@ -215,6 +217,12 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "default_model_type": (body.default_model_type or "").strip() or "ltx2_22B_distilled",
         "default_resolution": (body.default_resolution or "").strip() or "1280x704",
         "default_steps": int(body.default_steps or 8),
+        "default_guidance_scale": float(body.default_guidance_scale or 7.5),
+        "default_quality_preset": (
+            body.default_quality_preset
+            if body.default_quality_preset in ("fast", "balanced", "quality", "broadcast")
+            else "balanced"
+        ),
         "allow_mock_fallback": bool(body.allow_mock_fallback),
         "queue_enabled": bool(body.queue_enabled),
         "max_concurrent_jobs": max_c,
@@ -541,7 +549,9 @@ async def create_job(
         "control_strength": control_strength,
     }
     if mode == "easy":
-        params["steps"] = min(params["steps"], 25)
+        # Ceiling is a guard against runaway values, not a quality cap —
+        # the broadcast preset legitimately needs more than 25.
+        params["steps"] = min(params["steps"], 40)
         params["resolution"] = params.get("resolution") or "832x480"
         if job_type in ("t2v", "i2v", "ia2v", "v2v", "p2v"):
             params["duration_seconds"] = min(float(params["duration_seconds"]), 5)
