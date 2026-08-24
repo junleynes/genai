@@ -107,6 +107,114 @@ def _pick_control_model(mcp_url: str, requested: str | None = None) -> Optional[
     return best.get("model_type")
 
 
+def _normalize_lora_list(raw: Any) -> list[dict]:
+    """Accept the various shapes a LoRA-listing tool might return."""
+    items: Any = raw
+    if isinstance(raw, dict):
+        items = (
+            raw.get("loras") or raw.get("items") or raw.get("data")
+            or raw.get("result") or raw.get("files") or raw.get("names")
+        )
+        if items is None:
+            text = raw.get("text")
+            if isinstance(text, str) and text.strip().startswith(("[", "{")):
+                import json as _json
+                try:
+                    return _normalize_lora_list(_json.loads(text))
+                except Exception:
+                    return []
+            return []
+    if isinstance(items, str):
+        import json as _json
+        try:
+            return _normalize_lora_list(_json.loads(items))
+        except Exception:
+            # newline/comma separated plain list
+            parts = [p.strip() for p in items.replace("\n", ",").split(",") if p.strip()]
+            return [{"filename": p, "name": p} for p in parts]
+    if not isinstance(items, list):
+        return []
+
+    out: list[dict] = []
+    for it in items:
+        if isinstance(it, str):
+            out.append({"filename": it, "name": it})
+            continue
+        if not isinstance(it, dict):
+            continue
+        fn = (
+            it.get("filename") or it.get("file") or it.get("path")
+            or it.get("id") or it.get("name") or ""
+        )
+        if not fn:
+            continue
+        fn = str(fn).replace("\\", "/").split("/")[-1]
+        out.append({
+            "filename": fn,
+            "name": str(it.get("name") or fn),
+            "model_type": str(it.get("model_type") or it.get("model") or ""),
+        })
+    return out
+
+
+def list_loras_for_model(mcp_url: str, model_type: str = "") -> tuple[list[dict], bool]:
+    """
+    LoRAs available for a model. WanGP keeps LoRAs in model-specific
+    subdirectories under loras/, so the set is not global — a LoRA built
+    for one architecture will not load on another.
+
+    Tool naming varies between WanGP builds (and older builds may expose
+    no LoRA tool at all), so discover rather than hardcode. Returns
+    (loras, supported); supported=False means this install exposes no
+    LoRA listing tool and the UI should fall back to free-text entry.
+    """
+    candidates = _find_tools(
+        mcp_url,
+        include=("lora", "loras"),
+        exclude=("download", "delete", "remove", "upload", "apply", "activate"),
+    )
+    if not candidates:
+        logger.info("No LoRA-listing tool on this MCP server; free-text entry only")
+        return [], False
+
+    arg_sets: list[dict] = []
+    if model_type:
+        arg_sets.extend([{"model_type": model_type}, {"model": model_type}])
+    arg_sets.append({})
+
+    for tool in candidates:
+        tname = str(tool.get("name") or "")
+        params = set(_tool_param_names(tool))
+        for args in arg_sets:
+            # Don't send an argument the tool doesn't declare.
+            if args and not (set(args) & params):
+                continue
+            try:
+                raw = mcp_call_tool(mcp_url, tname, args, timeout=45.0)
+            except Exception as e:
+                logger.debug("LoRA tool %s(%s) failed: %s", tname, args, e)
+                continue
+            loras = _normalize_lora_list(raw)
+            if loras:
+                # If the tool ignored our model filter and tagged results,
+                # narrow client-side so we never offer an incompatible LoRA.
+                if model_type and any(l.get("model_type") for l in loras):
+                    filtered = [
+                        l for l in loras
+                        if not l.get("model_type") or l["model_type"] == model_type
+                    ]
+                    if filtered:
+                        loras = filtered
+                logger.info(
+                    "Found %d LoRA(s) via %s for model_type=%s",
+                    len(loras), tname, model_type or "(any)",
+                )
+                return loras, True
+
+    logger.info("LoRA tool(s) present but returned nothing for model_type=%s", model_type)
+    return [], True
+
+
 def _parse_loras(raw: str) -> tuple[list[str], str]:
     """
     Parse a "filename:weight, filename2:weight2" string (commas and/or

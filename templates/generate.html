@@ -162,13 +162,17 @@
 
         <div class="mt-4 adv-only">
           <label class="block text-sm font-medium mb-1.5">LoRAs (optional)</label>
-          <textarea name="loras" id="loras-input" rows="2" placeholder="lora-file-name.safetensors:1.0, other-lora.safetensors:0.8"
-            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-xs"></textarea>
-          <p class="text-xs text-slate-400 mt-1">
-            One or more LoRAs to activate for this pose-driven generation, as <code>filename:weight</code>
-            pairs separated by commas or newlines. Weight defaults to 1.0 if omitted. Filenames must match
-            what WanGP shows in its Loras list for the selected model.
-          </p>
+          <div id="lora-picker" class="hidden space-y-1.5 max-h-52 overflow-y-auto p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"></div>
+          <p id="lora-status" class="text-xs text-slate-400 mt-1">Select a model to see its LoRAs.</p>
+          <div id="lora-manual-wrap" class="hidden">
+            <textarea name="loras" id="loras-input" rows="2" placeholder="lora-file-name.safetensors:1.0, other-lora.safetensors:0.8"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-xs"></textarea>
+            <p class="text-xs text-slate-400 mt-1">
+              <code>filename:weight</code> pairs, comma or newline separated. Weight defaults to 1.0.
+              Filenames must match WanGP's Loras list for the selected model.
+            </p>
+          </div>
+          <input type="hidden" name="loras" id="loras-hidden" disabled />
         </div>
       </div>
 
@@ -536,6 +540,102 @@ function fillModelSelect(models) {
   }
 }
 
+// ── LoRA picker ────────────────────────────────────────────────────────
+// WanGP keeps LoRAs in model-specific subdirectories, so the available set
+// depends on the selected model. We list only compatible ones; if this
+// WanGP build exposes no LoRA tool, fall back to free-text entry.
+let loraReqSeq = 0;
+
+function loraModeManual(on) {
+  const manual = document.getElementById('lora-manual-wrap');
+  const picker = document.getElementById('lora-picker');
+  const ta = document.getElementById('loras-input');
+  const hidden = document.getElementById('loras-hidden');
+  if (!manual || !picker || !ta || !hidden) return;
+  manual.classList.toggle('hidden', !on);
+  picker.classList.toggle('hidden', on);
+  // Only one of the two may carry the "loras" field on submit — a hidden
+  // <textarea> still submits, so disable rather than just hide it.
+  ta.disabled = !on;
+  hidden.disabled = on;
+}
+
+async function loadLoras() {
+  const picker = document.getElementById('lora-picker');
+  const status = document.getElementById('lora-status');
+  if (!picker || !status) return;
+
+  // Only pose-driven jobs expose LoRAs today.
+  if (currentType !== 'p2v') return;
+
+  const sel = document.getElementById('model-select');
+  const modelType = (sel && sel.value && sel.value !== 'auto') ? sel.value : '';
+  const seq = ++loraReqSeq;
+
+  status.textContent = 'Loading LoRAs…';
+  status.className = 'text-xs text-slate-400 mt-1';
+  picker.innerHTML = '';
+
+  let data;
+  try {
+    data = await API.get('/api/loras?model_type=' + encodeURIComponent(modelType));
+  } catch (e) {
+    if (seq !== loraReqSeq) return;
+    loraModeManual(true);
+    status.textContent = 'Could not load LoRAs — enter filenames manually.';
+    status.className = 'text-xs text-amber-600 mt-1';
+    return;
+  }
+  if (seq !== loraReqSeq) return; // a newer request superseded this one
+
+  if (!data.supported) {
+    loraModeManual(true);
+    status.textContent = 'This WanGP build has no LoRA list — enter filenames manually.';
+    status.className = 'text-xs text-slate-400 mt-1';
+    return;
+  }
+
+  if (!data.loras || !data.loras.length) {
+    loraModeManual(false);
+    picker.classList.add('hidden');
+    status.textContent = modelType
+      ? 'No LoRAs installed for this model.'
+      : 'Select a specific model (not Auto) to see its LoRAs.';
+    status.className = 'text-xs text-slate-400 mt-1';
+    return;
+  }
+
+  loraModeManual(false);
+  picker.classList.remove('hidden');
+  for (const l of data.loras) {
+    const row = document.createElement('label');
+    row.className = 'flex items-center gap-2 text-xs p-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer';
+    row.innerHTML = `
+      <input type="checkbox" class="lora-check" value="${l.filename}" />
+      <span class="flex-1 truncate font-mono" title="${l.filename}">${l.name || l.filename}</span>
+      <input type="number" class="lora-weight w-16 px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-right"
+             value="1.0" min="0" max="3" step="0.05" />
+    `;
+    picker.appendChild(row);
+  }
+  status.textContent = data.loras.length + ' LoRA(s) available for this model. Tick to activate; number is the weight.';
+  status.className = 'text-xs text-slate-400 mt-1';
+}
+
+// Serialize picker selections into the hidden "loras" field at submit time.
+function syncLorasHidden() {
+  const hidden = document.getElementById('loras-hidden');
+  const picker = document.getElementById('lora-picker');
+  if (!hidden || !picker || hidden.disabled) return;
+  const parts = [];
+  picker.querySelectorAll('.lora-check').forEach(cb => {
+    if (!cb.checked) return;
+    const w = cb.parentElement.querySelector('.lora-weight');
+    parts.push(cb.value + ':' + ((w && w.value) || '1.0'));
+  });
+  hidden.value = parts.join(', ');
+}
+
 function inferFamily(m) {
   if (m.family && String(m.family).trim()) return String(m.family).trim();
   const mt = String(m.model_type || '').toLowerCase();
@@ -606,6 +706,7 @@ async function loadModels() {
     }
     rebuildFamilyOptions(allModelsCache);
     fillModelSelect(allModelsCache);
+    loadLoras();
   } catch (err) {
     allModelsCache = [];
     sel.innerHTML = `<option value="auto">${autoModelLabel()}</option>`;
@@ -757,6 +858,9 @@ document.getElementById('gen-form').addEventListener('submit', async (e) => {
   btn.disabled = true;
   btn.textContent = 'Submitting…';
 
+  // Must run before FormData is built so the hidden field carries the picks.
+  syncLorasHidden();
+
   const fd = new FormData(form);
   fd.set('job_type', currentType);
   fd.set('mode', currentMode);
@@ -838,6 +942,11 @@ document.getElementById('control-video-input')?.addEventListener('change', (e) =
 document.getElementById('control-strength')?.addEventListener('input', (e) => {
   document.getElementById('control-strength-val').textContent =
     Number(e.target.value).toFixed(2);
+});
+
+// LoRAs are model-specific, so re-list whenever the model changes.
+document.getElementById('model-select')?.addEventListener('change', () => {
+  loadLoras();
 });
 
 const CONTROL_HINTS = {

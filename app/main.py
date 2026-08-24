@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from . import auth, db
 from . import generation as gen_mod
-from .generation import process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type, try_start_queued_jobs
+from .generation import process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type, list_loras_for_model, try_start_queued_jobs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("genai")
@@ -447,6 +447,49 @@ async def cancel_job(
     except Exception:
         logger.exception("queue kick after cancel")
     return updated
+
+
+@app.get("/api/loras")
+async def api_loras(model_type: str = "", user: dict = Depends(auth.get_current_user)):
+    """
+    LoRAs available for a given model. WanGP stores LoRAs in
+    model-specific subdirectories, so the set changes with the model.
+
+    `supported` is False when this WanGP build exposes no LoRA-listing
+    tool at all — the UI falls back to free-text entry in that case
+    rather than showing an empty picker.
+    """
+    settings = db.get_settings()
+    mcp_url = (settings.get("wan2gp_mcp_url") or "").strip()
+    enabled = bool(settings.get("wan2gp_enabled"))
+    if not mcp_url or not enabled:
+        return {
+            "ok": False,
+            "loras": [],
+            "supported": False,
+            "message": "Wan2GP is not configured or is disabled.",
+            "model_type": model_type,
+        }
+    try:
+        loras, supported = await asyncio.to_thread(
+            list_loras_for_model, mcp_url, model_type
+        )
+        return {
+            "ok": True,
+            "loras": loras,
+            "supported": supported,
+            "count": len(loras),
+            "model_type": model_type,
+        }
+    except Exception as e:
+        logger.exception("api/loras failed")
+        return {
+            "ok": False,
+            "loras": [],
+            "supported": False,
+            "message": str(e)[:500],
+            "model_type": model_type,
+        }
 
 
 @app.post("/api/jobs")
