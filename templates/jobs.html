@@ -81,16 +81,8 @@ function paramChips(j) {
   ).join(' ');
 }
 
-async function loadJobs() {
-  const el = document.getElementById('jobs-list');
-  try {
-    const jobs = await API.get('/api/jobs');
-    JOBS = jobs;
-    if (!jobs.length) {
-      el.innerHTML = '<p class="text-slate-500">No jobs yet. <a href="/generate" class="text-brand underline">Create one</a>.</p>';
-      return;
-    }
-    el.innerHTML = jobs.map(j => `
+function renderJobCard(j) {
+  return `
       <div class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800" data-id="${j.id}" data-status="${escapeHtml(j.status)}">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
@@ -142,7 +134,58 @@ async function loadJobs() {
           </div>
         ` : ''}
       </div>
-    `).join('');
+    `;
+}
+
+// Signature of the fields that actually affect a card's markup. Used to skip
+// re-rendering cards whose data hasn't changed on each poll — a full
+// innerHTML replace would recreate <video> elements every 4s and restart
+// playback even for jobs that finished long ago.
+function jobSignature(j) {
+  return JSON.stringify([j.status, j.progress, j.result_url, j.error, j.title, j.prompt]);
+}
+
+let jobOrder = [];
+let jobSigs = new Map();
+
+async function loadJobs() {
+  const el = document.getElementById('jobs-list');
+  try {
+    const jobs = await API.get('/api/jobs');
+    JOBS = jobs;
+    if (!jobs.length) {
+      el.innerHTML = '<p class="text-slate-500">No jobs yet. <a href="/generate" class="text-brand underline">Create one</a>.</p>';
+      jobOrder = [];
+      jobSigs = new Map();
+      return;
+    }
+
+    const newOrder = jobs.map(j => j.id);
+    const orderChanged = el.children.length === 0
+      || newOrder.length !== jobOrder.length
+      || newOrder.some((id, i) => id !== jobOrder[i]);
+
+    if (orderChanged) {
+      // Jobs added/removed/reordered — full render, nothing stable to preserve.
+      el.innerHTML = jobs.map(renderJobCard).join('');
+      jobSigs = new Map(jobs.map(j => [j.id, jobSignature(j)]));
+      jobOrder = newOrder;
+      return;
+    }
+
+    // Same set of jobs in the same order — only touch cards that actually
+    // changed, leaving untouched cards (and their <video>/<img>) in place.
+    jobs.forEach(j => {
+      const sig = jobSignature(j);
+      if (jobSigs.get(j.id) === sig) return;
+      const node = el.querySelector(`[data-id="${CSS.escape(j.id)}"]`);
+      if (node) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = renderJobCard(j).trim();
+        node.replaceWith(tmp.firstElementChild);
+      }
+      jobSigs.set(j.id, sig);
+    });
   } catch (err) {
     el.innerHTML = `<p class="text-red-500">${escapeHtml(err.message)}</p>`;
   }
