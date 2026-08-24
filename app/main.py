@@ -715,7 +715,11 @@ def home(request: Request):
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    return _page(request, "login.html")
+    # Login is a popup on the landing page only — bounce any direct/legacy
+    # link to "/login" back to "/" with a flag that auto-opens the modal.
+    next_url = request.query_params.get("next", "")
+    qs = f"?login=1&next={next_url}" if next_url else "?login=1"
+    return RedirectResponse(url=f"/{qs}")
 
 
 @app.get("/register", response_class=HTMLResponse)

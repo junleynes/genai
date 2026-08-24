@@ -14,7 +14,7 @@
     `;
   } else {
     el.innerHTML = `
-      <a href="/login" class="text-sm px-3 py-1.5 rounded-lg hover:bg-white/60 dark:hover:bg-slate-800/60">Log in</a>
+      <button type="button" onclick="openLoginModal()" class="text-sm px-3 py-1.5 rounded-lg hover:bg-white/60 dark:hover:bg-slate-800/60">Log in</button>
       <a href="/register" class="text-sm px-3 py-1.5 rounded-lg btn-brand shadow-sm">Sign up</a>
     `;
   }

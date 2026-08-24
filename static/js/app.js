@@ -113,7 +113,7 @@ function renderNav() {
         html += navLink('/admin/users', 'Users', icons.users);
       }
     } else {
-      html += navLink('/login', 'Log in', '→');
+      html += `<a href="/?login=1" class="sidebar-link flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"><span>→</span><span>Log in</span></a>`;
       html += navLink('/register', 'Sign up', '+');
     }
     side.innerHTML = html;
@@ -130,7 +130,7 @@ function renderNav() {
       `;
     } else {
       sideAuth.innerHTML = `
-        <a href="/login" class="block text-center text-sm px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 mb-2">Log in</a>
+        <a href="/?login=1" class="block text-center text-sm px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 mb-2">Log in</a>
         <a href="/register" class="block text-center text-sm px-3 py-2 rounded-lg btn-brand">Sign up</a>
       `;
     }
@@ -146,12 +146,66 @@ function logout() {
   window.location.href = '/';
 }
 
-function requireAuth(redirect = '/login') {
+function requireAuth() {
   if (!isLoggedIn()) {
-    window.location.href = redirect + '?next=' + encodeURIComponent(location.pathname);
+    // Login only exists as a popup on the landing page.
+    window.location.href = '/?login=1&next=' + encodeURIComponent(location.pathname);
     return false;
   }
   return true;
+}
+
+function openLoginModal(next) {
+  const modal = document.getElementById('login-modal');
+  if (!modal) return;
+  if (next) modal.dataset.next = next;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  document.body.classList.add('overflow-hidden');
+  modal.querySelector('input[name="email"]')?.focus();
+}
+
+function closeLoginModal() {
+  const modal = document.getElementById('login-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  document.body.classList.remove('overflow-hidden');
+}
+
+function initLoginModal() {
+  const modal = document.getElementById('login-modal');
+  const form = document.getElementById('login-modal-form');
+  if (!modal || !form) return;
+
+  document.getElementById('login-modal-close')?.addEventListener('click', closeLoginModal);
+  document.getElementById('login-modal-backdrop')?.addEventListener('click', closeLoginModal);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeLoginModal();
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    try {
+      const data = await API.post('/api/auth/login', {
+        email: fd.get('email'),
+        password: fd.get('password'),
+      });
+      setAuth(data.token, data.user);
+      toast('Logged in', 'success');
+      const next = modal.dataset.next || '/generate';
+      window.location.href = next;
+    } catch (err) {
+      toast(err.message || 'Login failed', 'error');
+    }
+  });
+
+  // Auto-open when linked here from a page that required auth, e.g. /?login=1&next=/jobs
+  const params = new URLSearchParams(location.search);
+  if (params.get('login') === '1') {
+    openLoginModal(params.get('next') || '');
+  }
 }
 
 function requireAdmin() {
@@ -263,4 +317,5 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
   renderNav();
   initSidebarMobile();
+  initLoginModal();
 });
