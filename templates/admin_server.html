@@ -79,6 +79,14 @@
         class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
       <p class="text-xs text-slate-400 mt-1">Must match a model id available in your WanGP install (export settings from UI for exact id).</p>
     </div>
+      <div>
+        <label class="block text-sm font-medium mb-1.5">Default model — images</label>
+        <input id="default_image_model_type" value="{{ settings.default_image_model_type or 'flux_dev' }}"
+          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm" />
+        <p class="text-xs text-slate-400 mt-1">
+          Used when Model is set to Auto on a Text→Image or Image→Image job. The field above applies to video jobs.
+        </p>
+      </div>
     <div class="grid grid-cols-2 gap-4">
       <div>
         <label class="block text-sm font-medium mb-1.5">Default resolution</label>
@@ -190,6 +198,7 @@ function payload() {
     wan2gp_enabled: document.getElementById('wan2gp_enabled').checked,
     wan2gp_cli_args: document.getElementById('wan2gp_cli_args').value.trim(),
     default_model_type: document.getElementById('default_model_type').value.trim(),
+    default_image_model_type: document.getElementById('default_image_model_type').value.trim(),
     default_resolution: document.getElementById('default_resolution').value.trim(),
     default_steps: parseInt(document.getElementById('default_steps').value, 10) || 8,
     default_guidance_scale: parseFloat(document.getElementById('default_guidance_scale').value) || 7.5,

@@ -423,6 +423,16 @@
   }
 </style>
 <script>
+// Server-side "Auto" targets, so the dropdown can name the model it will use
+// instead of leaving it opaque.
+const AUTO_MODELS = {
+  video: '{{ settings.default_model_type or "ltx2_22B_distilled" }}',
+  image: '{{ settings.default_image_model_type or "flux_dev" }}',
+};
+function autoModelLabel() {
+  const m = isVideoOut() ? AUTO_MODELS.video : AUTO_MODELS.image;
+  return m ? `Auto — ${m}` : 'Auto (server default)';
+}
 let LIBRARY_SEED = null;
 let CONTROL_SEED = null;
 
@@ -490,7 +500,7 @@ function fillModelSelect(models) {
   sel.innerHTML = '';
   const optAuto = document.createElement('option');
   optAuto.value = 'auto';
-  optAuto.textContent = 'Auto (server default)';
+  optAuto.textContent = autoModelLabel();
   sel.appendChild(optAuto);
   for (const m of list) {
     const o = document.createElement('option');
@@ -562,7 +572,7 @@ async function loadModels() {
     const data = await API.get('/api/models?job_type=' + encodeURIComponent(currentType));
     if (!data.ok) {
       allModelsCache = [];
-      sel.innerHTML = '<option value="auto">Auto (server default)</option>';
+      sel.innerHTML = `<option value="auto">${autoModelLabel()}</option>`;
       if (hint) {
         hint.textContent = data.message || 'Could not load models';
         hint.className = 'text-xs text-amber-600 flex-1';
@@ -572,7 +582,7 @@ async function loadModels() {
     }
     allModelsCache = data.models || [];
     if (!allModelsCache.length) {
-      sel.innerHTML = '<option value="auto">Auto (server default)</option>';
+      sel.innerHTML = `<option value="auto">${autoModelLabel()}</option>`;
       if (hint) {
         hint.textContent = 'No models matched this mode on the MCP server.';
         hint.className = 'text-xs text-amber-600 flex-1';
@@ -584,7 +594,7 @@ async function loadModels() {
     fillModelSelect(allModelsCache);
   } catch (err) {
     allModelsCache = [];
-    sel.innerHTML = '<option value="auto">Auto (server default)</option>';
+    sel.innerHTML = `<option value="auto">${autoModelLabel()}</option>`;
     if (hint) {
       hint.textContent = 'Model list error: ' + err.message;
       hint.className = 'text-xs text-red-500 flex-1';
