@@ -342,6 +342,25 @@
   }
   .type-card.active .type-check { opacity: 1; transform: scale(1); }
 
+  /* ── Easy / Advanced toggle ────────────────────────────────────────── */
+  /* The selected pill is raised out of the track; the unselected one is
+     muted. Both states are declared so neither relies on inherited colour. */
+  .mode-btn {
+    color: #64748b;
+    background: transparent;
+    box-shadow: none;
+  }
+  .dark .mode-btn { color: #94a3b8; }
+  .mode-btn:hover { color: #334155; }
+  .dark .mode-btn:hover { color: #cbd5e1; }
+  .mode-btn.active {
+    background: #fff;
+    color: #0f172a;
+    box-shadow: 0 1px 3px rgb(0 0 0 / .1);
+  }
+  .dark .mode-btn.active { background: #1e293b; color: #f1f5f9; }
+  .mode-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
   /* ── Selected-type bar (replaces the grid once a type is chosen) ───── */
   #selected-bar[hidden] { display: none; }
   #selected-bar { margin-bottom: 1.5rem; animation: revealUp .25s ease both; }
