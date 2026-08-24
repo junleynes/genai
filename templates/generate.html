@@ -873,5 +873,83 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLibMo
     sessionStorage.removeItem('library_seed');
   } catch (_) {}
 })();
+// ─── Reuse settings from a finished job ──────────────────────────────────
+// Arrives from the Jobs page. Fields are applied by name so a param the form
+// no longer has simply doesn't apply, rather than throwing.
+function applyReusedJob(data) {
+  if (!data || !data.job_type) return false;
+
+  const card = document.querySelector(`.type-card[data-type="${data.job_type}"]`);
+  if (!card) return false;
+  selectType(card);            // also reveals the form and hides the picker
+
+  if (data.mode === 'advanced') {
+    document.getElementById('mode-advanced')?.click();
+  }
+
+  const prompt = document.getElementById('prompt');
+  if (prompt && data.prompt) prompt.value = data.prompt;
+  const title = document.querySelector('[name="title"]');
+  if (title && data.title) title.value = data.title;
+
+  const p = data.params || {};
+  const setVal = (name, value) => {
+    if (value === null || value === undefined || value === '') return;
+    const el = document.querySelector(`[name="${name}"]`);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!value;
+    else el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  [
+    'resolution', 'steps', 'guidance_scale', 'seed', 'duration_seconds', 'fps',
+    'negative_prompt', 'flow_shift', 'sample_solver', 'repeat_generation',
+    'control_type', 'control_strength',
+  ].forEach(k => setVal(k, p[k]));
+
+  // The model list loads asynchronously, so the saved choice has to wait for it.
+  const wanted = p.model_type || p.model;
+  if (wanted && wanted !== 'auto') {
+    let tries = 0;
+    const pick = () => {
+      const sel = document.getElementById('model-select');
+      if (!sel) return;
+      const match = [...sel.options].find(o => o.value === wanted);
+      if (match) {
+        sel.value = wanted;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      } else if (++tries < 25) {
+        setTimeout(pick, 200);
+      } else {
+        // Model gone, or filtered out because it makes the wrong media type.
+        toast(`Model "${wanted}" isn't available for this type — using default`, 'error');
+      }
+    };
+    setTimeout(pick, 300);
+  }
+
+  // Input files can't be repopulated for security reasons; say so plainly
+  // rather than letting someone hit Generate with a missing image.
+  const needsMedia = ['i2v', 'i2i', 'ia2v', 'v2v', 'p2v'].includes(data.job_type);
+  if (needsMedia) {
+    toast('Settings restored — re-select your input media', 'success');
+  } else {
+    toast('Settings restored', 'success');
+  }
+  return true;
+}
+
+(function initReuse() {
+  const params = new URLSearchParams(location.search);
+  if (!params.get('reuse')) return;
+  try {
+    const data = JSON.parse(sessionStorage.getItem('reuse_job') || 'null');
+    sessionStorage.removeItem('reuse_job');
+    if (data) applyReusedJob(data);
+  } catch (_) {}
+})();
+
 </script>
 {% endblock %}

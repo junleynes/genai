@@ -13,9 +13,18 @@
     <p class="text-slate-500">Loading…</p>
   </div>
 </div>
+
+<!-- Job detail drawer -->
+<div id="job-drawer" class="hidden fixed inset-0 z-50">
+  <div class="absolute inset-0 bg-black/60" onclick="closeDetails()"></div>
+  <div class="absolute right-0 inset-y-0 w-full max-w-lg bg-white dark:bg-slate-900 shadow-2xl overflow-y-auto">
+    <div id="job-drawer-body" class="p-6"></div>
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>
+let JOBS = [];
 if (!requireAuth()) throw new Error('auth');
 
 function statusBadge(s) {
@@ -58,6 +67,7 @@ async function loadJobs() {
   const el = document.getElementById('jobs-list');
   try {
     const jobs = await API.get('/api/jobs');
+    JOBS = jobs;
     if (!jobs.length) {
       el.innerHTML = '<p class="text-slate-500">No jobs yet. <a href="/generate" class="text-brand underline">Create one</a>.</p>';
       return;
@@ -90,6 +100,10 @@ async function loadJobs() {
             ` : ''}
             ${(j.status === 'failed' || j.status === 'cancelled' || j.status === 'canceled') ? `
               <button type="button" onclick="retryJob('${j.id}')" class="text-sm px-3 py-1.5 rounded-lg bg-brand text-white hover:opacity-90 font-medium">Retry</button>
+            ` : ''}
+            <button type="button" onclick="showDetails('${j.id}')" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">Details</button>
+            ${j.status === 'completed' ? `
+              <button type="button" onclick="reuseJob('${j.id}')" class="text-sm px-3 py-1.5 rounded-lg border border-brand text-brand hover:bg-brand/5 font-medium">Reuse</button>
             ` : ''}
             <button type="button" onclick="deleteJob('${j.id}')" class="text-sm px-3 py-1.5 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30">Delete</button>
           </div>
@@ -150,5 +164,120 @@ async function deleteJob(id) {
 
 loadJobs();
 setInterval(() => loadJobs(), 4000);
+// ─── Job details & reuse ─────────────────────────────────────────────────
+// Field labels for the settings table. Anything not listed still shows, using
+// its raw key — better to reveal an unknown setting than silently drop it.
+const PARAM_LABELS = {
+  model_type: 'Model', model: 'Model', resolution: 'Resolution', steps: 'Steps',
+  guidance_scale: 'Guidance (CFG)', seed: 'Seed', duration_seconds: 'Duration (s)',
+  fps: 'FPS', negative_prompt: 'Negative prompt', flow_shift: 'Flow shift',
+  sample_solver: 'Sampler', repeat_generation: 'Repeats', control_type: 'Control type',
+  control_strength: 'Control strength', video_length: 'Frames', embedded_guidance_scale: 'Embedded guidance',
+};
+const HIDE_PARAMS = new Set([
+  'image_url', 'audio_url', 'video_url', 'end_image_url', 'control_video_url',
+]);
+
+function copyText(text, label) {
+  navigator.clipboard.writeText(text)
+    .then(() => toast((label || 'Copied') + ' to clipboard', 'success'))
+    .catch(() => toast('Copy failed', 'error'));
+}
+
+function showDetails(id) {
+  const j = JOBS.find(x => x.id === id);
+  if (!j) return;
+  const p = j.params || {};
+
+  const rows = Object.entries(p)
+    .filter(([k, v]) => !HIDE_PARAMS.has(k) && v !== null && v !== undefined && v !== '')
+    .map(([k, v]) => `
+      <div class="flex justify-between gap-4 py-2 border-b border-slate-100 dark:border-slate-800">
+        <span class="text-slate-500 dark:text-slate-400">${escapeHtml(PARAM_LABELS[k] || k)}</span>
+        <span class="font-mono text-right break-all">${escapeHtml(String(v))}</span>
+      </div>`).join('');
+
+  const media = [
+    ['Input image', p.image_url], ['End image', p.end_image_url],
+    ['Audio', p.audio_url], ['Input video', p.video_url],
+    ['Driving video', p.control_video_url],
+  ].filter(([, u]) => u).map(([label, u]) => `
+      <div class="flex justify-between gap-4 py-2 border-b border-slate-100 dark:border-slate-800">
+        <span class="text-slate-500 dark:text-slate-400">${label}</span>
+        <a href="${u}" target="_blank" rel="noopener" class="text-brand underline truncate max-w-[16rem]">${escapeHtml(u.split('/').pop())}</a>
+      </div>`).join('');
+
+  document.getElementById('job-drawer-body').innerHTML = `
+    <div class="flex items-start justify-between gap-4 mb-5">
+      <div class="min-w-0">
+        <h2 class="text-lg font-bold truncate">${escapeHtml(j.title || 'Job details')}</h2>
+        <p class="text-xs text-slate-400 mt-0.5">${new Date(j.created_at).toLocaleString()} · ${escapeHtml(j.job_type || '')} · ${escapeHtml(j.mode || '')}</p>
+      </div>
+      <button onclick="closeDetails()" class="text-2xl leading-none text-slate-400 hover:text-slate-600">&times;</button>
+    </div>
+
+    ${j.result_url && j.status === 'completed' ? (
+      /\.(mp4|webm|mov)$/i.test(j.result_url)
+        ? `<video src="${j.result_url}" controls class="w-full rounded-xl bg-black mb-5"></video>`
+        : `<img src="${j.result_url}" class="w-full rounded-xl mb-5" />`
+    ) : ''}
+
+    <div class="mb-5">
+      <div class="flex items-center justify-between mb-1.5">
+        <h3 class="text-xs uppercase tracking-wide text-slate-400">Prompt</h3>
+        <button onclick="copyText(JOB_PROMPT, 'Prompt')" class="text-xs text-brand hover:underline">Copy</button>
+      </div>
+      <p class="text-sm whitespace-pre-wrap break-words p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">${escapeHtml(j.prompt || '(none)')}</p>
+    </div>
+
+    ${p.negative_prompt ? `
+    <div class="mb-5">
+      <h3 class="text-xs uppercase tracking-wide text-slate-400 mb-1.5">Negative prompt</h3>
+      <p class="text-sm whitespace-pre-wrap break-words p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">${escapeHtml(p.negative_prompt)}</p>
+    </div>` : ''}
+
+    <h3 class="text-xs uppercase tracking-wide text-slate-400 mb-1">Settings</h3>
+    <div class="text-sm mb-5">${rows || '<p class="text-slate-400 py-2">No stored settings.</p>'}</div>
+
+    ${media ? `<h3 class="text-xs uppercase tracking-wide text-slate-400 mb-1">Input media</h3>
+      <div class="text-sm mb-5">${media}</div>` : ''}
+
+    ${j.error ? `<div class="mb-5 p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900">
+      <h3 class="text-xs uppercase tracking-wide text-red-500 mb-1">Error</h3>
+      <p class="text-sm text-red-700 dark:text-red-300 break-words">${escapeHtml(j.error)}</p>
+    </div>` : ''}
+
+    <div class="flex flex-wrap gap-2">
+      <button onclick="reuseJob('${j.id}')" class="flex-1 min-w-[8rem] px-4 py-2.5 rounded-xl bg-brand text-white font-semibold text-sm hover:opacity-90">Reuse settings</button>
+      <button onclick="copyText(JSON.stringify({prompt: JOB_PROMPT, ...JOB_PARAMS}, null, 2), 'Settings')" class="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-sm">Copy JSON</button>
+      ${j.result_url ? `<a href="${j.result_url}" download class="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-sm">Download</a>` : ''}
+    </div>`;
+
+  // Held separately so quotes/newlines in the prompt can't break the markup.
+  window.JOB_PROMPT = j.prompt || '';
+  window.JOB_PARAMS = p;
+  document.getElementById('job-drawer').classList.remove('hidden');
+}
+
+function closeDetails() {
+  document.getElementById('job-drawer').classList.add('hidden');
+}
+
+function reuseJob(id) {
+  const j = JOBS.find(x => x.id === id);
+  if (!j) return;
+  // Handed to the Create page, which reads it once and clears it.
+  sessionStorage.setItem('reuse_job', JSON.stringify({
+    job_type: j.job_type,
+    mode: j.mode,
+    prompt: j.prompt || '',
+    title: j.title || '',
+    params: j.params || {},
+  }));
+  location.href = '/generate?reuse=' + encodeURIComponent(id);
+}
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetails(); });
+
 </script>
 {% endblock %}
