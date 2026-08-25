@@ -317,11 +317,22 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     if jtype in ("i2v", "ia2v") and image_path:
         settings["image_start"] = str(image_path)
         settings["image_prompt_type"] = "S"
-    if image_end:
-        settings["image_end"] = str(image_end)
     if jtype == "v2v" and video_path:
         settings["video_source"] = str(video_path)
         settings["image_prompt_type"] = "V"
+    # End frame. Only i2v/v2v offer it, and WanGP only honours it when "E"
+    # is present in image_prompt_type — setting image_end alone leaves the
+    # end frame silently ignored, the same failure mode as an unguided pose.
+    if image_end and jtype in ("i2v", "v2v"):
+        settings["image_end"] = str(image_end)
+        letters = settings.get("image_prompt_type") or ""
+        if "E" not in letters:
+            settings["image_prompt_type"] = letters + "E"
+    elif image_end:
+        logger.info(
+            "Job %s: ignoring end image — %s does not support one",
+            job.get("id"), jtype,
+        )
     if jtype == "ia2v" and audio_path:
         settings["audio_guide"] = str(audio_path)
         settings["audio_prompt_type"] = "A"

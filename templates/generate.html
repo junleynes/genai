@@ -163,21 +163,21 @@
             Higher follows the driving motion more strictly; lower gives the model more freedom.
           </p>
         </div>
+      </div>
 
-        <div class="mt-4 adv-only">
-          <label class="block text-sm font-medium mb-1.5">LoRAs (optional)</label>
-          <div id="lora-picker" class="hidden space-y-1.5 max-h-52 overflow-y-auto p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"></div>
-          <p id="lora-status" class="text-xs text-slate-400 mt-1">Select a model to see its LoRAs.</p>
-          <div id="lora-manual-wrap" class="hidden">
-            <textarea name="loras" id="loras-input" rows="2" placeholder="lora-file-name.safetensors:1.0, other-lora.safetensors:0.8"
-              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-xs"></textarea>
-            <p class="text-xs text-slate-400 mt-1">
-              <code>filename:weight</code> pairs, comma or newline separated. Weight defaults to 1.0.
-              Filenames must match WanGP's Loras list for the selected model.
-            </p>
-          </div>
-          <input type="hidden" name="loras" id="loras-hidden" disabled />
+      <div class="adv-only">
+        <label class="block text-sm font-medium mb-1.5">LoRAs (optional)</label>
+        <div id="lora-picker" class="hidden space-y-1.5 max-h-52 overflow-y-auto p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"></div>
+        <p id="lora-status" class="text-xs text-slate-400 mt-1">Select a model to see its LoRAs.</p>
+        <div id="lora-manual-wrap" class="hidden">
+          <textarea name="loras" id="loras-input" rows="2" placeholder="lora-file-name.safetensors:1.0, other-lora.safetensors:0.8"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-xs"></textarea>
+          <p class="text-xs text-slate-400 mt-1">
+            <code>filename:weight</code> pairs, comma or newline separated. Weight defaults to 1.0.
+            Filenames must match WanGP's Loras list for the selected model.
+          </p>
         </div>
+        <input type="hidden" name="loras" id="loras-hidden" disabled />
       </div>
 
       <div id="image-wrap" class="hidden">
@@ -569,8 +569,8 @@ async function loadLoras() {
   const status = document.getElementById('lora-status');
   if (!picker || !status) return;
 
-  // Only pose-driven jobs expose LoRAs today.
-  if (currentType !== 'p2v') return;
+  // LoRAs apply to every job type, not just pose-driven ones.
+  if (!currentType) return;
 
   const sel = document.getElementById('model-select');
   const modelType = (sel && sel.value && sel.value !== 'auto') ? sel.value : '';

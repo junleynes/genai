@@ -631,7 +631,7 @@ async def create_job(
         "control_video_url": control_video_url,
         "control_type": control_type if control_video_url else None,
         "control_strength": control_strength,
-        "loras": loras.strip() if control_video_url else "",
+        "loras": loras.strip(),
     }
     if mode == "easy":
         # Ceiling is a guard against runaway values, not a quality cap —
