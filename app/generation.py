@@ -45,17 +45,20 @@ def _duration_to_frames(seconds: float, fps: int = 24) -> int:
 
 def _is_control_capable(model_type: str, name: str = "", family: str = "") -> bool:
     """
-    Can this model consume a VACE-style guide video (video_guide +
-    video_prompt_type letters)?
+    Can this model consume a guide video (pose / depth / canny)?
 
-    Pose/depth/edge control is a VACE/Wan-family feature. LTX2, plain
-    Wan t2v/i2v, Hunyuan etc. accept the parameters silently and then
-    ignore them — generation "succeeds" but never follows the guide,
-    which looks exactly like pose control being broken. So we have to
-    identify guide-capable models explicitly rather than assume.
+    Two different mechanisms qualify:
+      - VACE and friends implement guide conditioning in the architecture.
+      - LTX-2 implements it through IC LoRAs: WanGP restores the LTX 2.3
+        LoRA workflows, pose/depth/canny control among them, from the
+        shared loras/ltx2 folder. Control still needs the matching IC LoRA
+        activated, but the model itself is a valid choice for a guided job.
+
+    Models outside both groups (plain Wan t2v/i2v, Hunyuan, Flux) accept
+    the guide parameters and silently ignore them, which looks exactly
+    like pose control being broken.
     """
     blob = f"{model_type} {name} {family}".lower()
-    # Architectures that actually implement guide conditioning.
     if any(k in blob for k in (
         "vace",      # VACE + VACE Lynx: the main control family
         "control",   # generic controlnet-style finetunes
@@ -64,9 +67,22 @@ def _is_control_capable(model_type: str, name: str = "", family: str = "") -> bo
         "scail",     # Scail / Scail-2 character animators
         "recam",     # ReCamMaster: re-shoot along a guide
         "phantom",   # Phantom: reference/guide conditioning
+        "ltx2",      # LTX-2 family: pose/depth/canny via IC LoRAs
+        "ltx-2",
+        "ltx_2",
     )):
         return True
     return False
+
+
+def _needs_control_lora(model_type: str, name: str = "", family: str = "") -> bool:
+    """
+    LTX-2 guide control is supplied by an IC LoRA rather than being built
+    into the checkpoint, so a guided LTX-2 job with no LoRA activated will
+    generate but ignore the guide. Used to warn rather than to block.
+    """
+    blob = f"{model_type} {name} {family}".lower()
+    return any(k in blob for k in ("ltx2", "ltx-2", "ltx_2"))
 
 
 def _pick_control_model(mcp_url: str, requested: str | None = None) -> Optional[str]:
@@ -94,12 +110,15 @@ def _pick_control_model(mcp_url: str, requested: str | None = None) -> Optional[
             if m.get("model_type") == requested:
                 return requested
 
-    # Prefer VACE proper, then other control families.
+    # Prefer VACE proper, then other control families. LTX-2 ranks lower
+    # only because it additionally needs an IC LoRA activated to work.
     def rank(m: dict) -> int:
         blob = f"{m.get('model_type','')} {m.get('name','')} {m.get('family','')}".lower()
         if "vace" in blob:
-            return 3
+            return 4
         if "animate" in blob or "scail" in blob:
+            return 3
+        if "ltx2" in blob or "ltx-2" in blob or "ltx_2" in blob:
             return 2
         return 1
 
@@ -962,9 +981,9 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 if explicit:
                     raise RuntimeError(
                         f"Model '{current}' cannot follow a driving video — "
-                        "pose/depth/edge control needs a VACE-style model "
-                        f"(e.g. '{picked}'). Pick one on the Generate page, or "
-                        "set Model to Auto."
+                        "pose/depth/edge control needs a VACE-style or LTX-2 "
+                        f"model (e.g. '{picked}'). Pick one on the Generate "
+                        "page, or set Model to Auto."
                     )
                 logger.info(
                     "Job %s: '%s' is not guide-capable; using '%s' for %s control",
@@ -974,10 +993,25 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 source["model_type"] = picked
             elif not picked:
                 raise RuntimeError(
-                    "No VACE/control-capable model is available on this WanGP "
-                    "install, so a driving video cannot be used. Install a VACE "
-                    "model (e.g. Wan 2.1/2.2 VACE) and try again."
+                    "No guide-capable model is available on this WanGP install, "
+                    "so a driving video cannot be used. Install a VACE model "
+                    "(e.g. Wan 2.1/2.2 VACE) or an LTX-2 model with its "
+                    "pose/depth/canny IC LoRA."
                 )
+
+        # LTX-2 gets control from an IC LoRA, not from the checkpoint, so a
+        # guided LTX-2 job with nothing activated will quietly ignore the
+        # guide. Warn loudly — we can't tell which local file is the right
+        # IC LoRA, so this is not something we can fix automatically.
+        final_model = str(source.get("model_type") or "")
+        if _needs_control_lora(final_model) and not source.get("activated_loras"):
+            logger.warning(
+                "Job %s: %s is an LTX-2 model and needs a pose/depth/canny IC "
+                "LoRA for control, but none is activated — the driving video "
+                "will be ignored. Set one in Admin -> Server & Queue "
+                "(default_loras_p2v) or pick one on the Generate page.",
+                job.get("id"), final_model,
+            )
 
     for key in (
         "image_start", "image_end", "image_refs",

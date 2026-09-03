@@ -110,14 +110,24 @@ def main():
 
     if capable:
         for m in capable[:20]:
-            print(f"    OK  {m.get('model_type')}  ({m.get('name')})")
+            note = "  (needs pose/depth IC LoRA)" if gen._needs_control_lora(
+                m.get("model_type", ""), m.get("name", ""), m.get("family", "")
+            ) else ""
+            print(f"    OK  {m.get('model_type')}  ({m.get('name')}){note}")
         print("\n  -> Pose control should work. Pick one of these, or leave")
         print("     Model on Auto and genai will choose one.")
+        if any(gen._needs_control_lora(m.get("model_type",""), m.get("name",""),
+                                       m.get("family","")) for m in capable):
+            print("\n  NOTE: LTX-2 gets pose/depth/canny control from an IC LoRA,")
+            print("  not from the checkpoint. Put the control IC LoRA in WanGP's")
+            print("  loras/ltx2 folder and activate it (Generate page, or set")
+            print("  default_loras_p2v in Admin -> Server & Queue). Without it")
+            print("  the job runs but ignores the driving video.")
     else:
         print("  NONE. This is why pose-driven generation does nothing:")
         print("  the guide is sent, and the model ignores it.")
-        print("\n  Install a VACE model in WanGP, e.g. 'Vace 14B' or a Wan 2.2")
-        print("  VACE variant, then re-run this script.\n")
+        print("\n  Install either a VACE model (e.g. 'Vace 14B') or an LTX-2")
+        print("  model plus its pose/depth/canny IC LoRA, then re-run.\n")
         print("  First 20 models currently offered for p2v:")
         for m in models[:20]:
             print(f"    --  {m.get('model_type')}  ({m.get('name')})")

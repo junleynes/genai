@@ -560,7 +560,7 @@ function fillModelSelect(models) {
     const total = (models || []).length;
     const shown = list.length;
     const suffix = currentType === 'p2v'
-      ? ' — only VACE-style models can follow a driving video'
+      ? ' — VACE-style or LTX-2 models only (LTX-2 also needs a pose/depth IC LoRA)'
       : '';
     hint.textContent = (family
       ? (shown + ' of ' + total + ' model(s) in family “' + family + '” for ' + currentType)
