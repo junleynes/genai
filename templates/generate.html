@@ -237,6 +237,11 @@
         Both VACE and LTX-2.3 MSR read the list in that order. Subject and object cutouts
         work best on a plain white background.
       </p>
+      <p id="refs-model-note" class="text-xs text-slate-400 mt-1 hidden">
+        Only some models read reference images — VACE, the LTX-2.3 MSR finetune,
+        and edit/identity models. Pick one explicitly in Advanced mode to be sure
+        yours does; plain checkpoints ignore them.
+      </p>
       <p id="refs-msr-hint" class="text-xs text-amber-600 dark:text-amber-400 mt-1 hidden">
         Describe each reference in your prompt and say what it provides — e.g.
         “Image 1 is the studio background, Image 2 is the presenter, Image 3 is the product.”
@@ -728,6 +733,44 @@ document.getElementById('refs-file-input')?.addEventListener('change', (e) => {
   renderRefs();
 });
 
+// Reference images are a per-MODEL feature, not per-job-type. Showing the
+// panel for a model that ignores image_refs would let people upload
+// references that silently do nothing.
+function modelSupportsRefs(mt) {
+  const b = (mt || '').toLowerCase();
+  return ['vace','msr','phantom','animate','lynx','standin','bernini','identity','edit','recam']
+    .some(k => b.includes(k));
+}
+
+function updateRefsVisibility() {
+  const wrap = document.getElementById('refs-wrap');
+  if (!wrap) return;
+  const sel = document.getElementById('model-select');
+  const chosen = sel ? sel.value : 'auto';
+
+  let show;
+  if (!chosen || chosen === 'auto') {
+    // Model is resolved server-side. p2v auto-picks a guide-capable model,
+    // which also takes references; other types resolve to plain checkpoints
+    // that generally don't, so don't offer refs on a guess.
+    show = currentType === 'p2v';
+  } else {
+    show = modelSupportsRefs(chosen);
+  }
+  wrap.classList.toggle('hidden', !show);
+
+  const note = document.getElementById('refs-model-note');
+  if (note) {
+    note.classList.toggle('hidden', !(show && (!chosen || chosen === 'auto')));
+  }
+  // Don't submit references the chosen model would ignore.
+  if (!show && REFS.length) {
+    REFS.forEach(r => { if (r.url.startsWith('blob:')) URL.revokeObjectURL(r.url); });
+    REFS = [];
+    renderRefs();
+  }
+}
+
 function inferFamily(m) {
   if (m.family && String(m.family).trim()) return String(m.family).trim();
   const mt = String(m.model_type || '').toLowerCase();
@@ -862,11 +905,7 @@ function updateUI() {
   document.getElementById('audio-wrap').classList.toggle('hidden', !needsAudio());
   document.getElementById('video-wrap').classList.toggle('hidden', !needsVideo());
   document.getElementById('end-image-wrap').classList.toggle('hidden', currentType !== 'v2v' && currentType !== 'i2v');
-  // Reference images: VACE (with a driving video) and LTX-2.3 MSR
-  // (reference-to-video, no driving video) both consume an ordered list.
-  document.getElementById('refs-wrap')?.classList.toggle(
-    'hidden', !['p2v', 't2v', 'i2v', 't2i', 'i2i'].includes(currentType)
-  );
+  updateRefsVisibility();
 
   document.getElementById('prompt-req').classList.toggle('hidden', !promptRequired());
   document.getElementById('prompt').required = promptRequired();
@@ -1065,6 +1104,7 @@ document.getElementById('control-strength')?.addEventListener('input', (e) => {
 // LoRAs are model-specific, so re-list whenever the model changes.
 document.getElementById('model-select')?.addEventListener('change', () => {
   loadLoras();
+  updateRefsVisibility();
 });
 
 const CONTROL_HINTS = {

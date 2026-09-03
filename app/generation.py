@@ -43,6 +43,34 @@ def _duration_to_frames(seconds: float, fps: int = 24) -> int:
     return max(5, (n // 4) * 4 + 1)
 
 
+def _supports_reference_images(model_type: str, name: str = "", family: str = "") -> bool:
+    """
+    Does this model consume image_refs?
+
+    Reference images are a per-model feature, not a per-job-type one. VACE
+    does reference-to-video; the LTX-2.3 MSR finetune packs 2-5 references
+    into a pseudo-video (plain LTX-2 Distilled does NOT — MSR is a separate
+    finetune); Qwen Image Edit Plus and Krea 2 Identity Edit do multi-
+    reference image editing; Phantom/Animate/Lynx take identity references.
+
+    Everything else accepts image_refs and ignores it, so sending refs
+    there produces output that silently disregards them.
+    """
+    blob = f"{model_type} {name} {family}".lower()
+    return any(k in blob for k in (
+        "vace",          # reference-to-video + control
+        "msr",           # LTX-2.3 Multiple Subject Reference finetune
+        "phantom",       # reference conditioning
+        "animate",       # Wan 2.2 Animate: reference images + pose
+        "lynx",          # identity reference
+        "standin",       # identity reference
+        "bernini",       # generates from multiple reference images
+        "identity",      # Krea 2 Identity Edit (up to 2 refs)
+        "edit",          # Qwen Image Edit Plus: multi-reference editing
+        "recam",
+    ))
+
+
 def _is_control_capable(model_type: str, name: str = "", family: str = "") -> bool:
     """
     Can this model consume a guide video (pose / depth / canny)?
@@ -1011,6 +1039,19 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 "will be ignored. Set one in Admin -> Server & Queue "
                 "(default_loras_p2v) or pick one on the Generate page.",
                 job.get("id"), final_model,
+            )
+
+    # Reference images only do something on models that consume them. Sending
+    # them elsewhere isn't an error, but the output silently disregards them,
+    # so say so rather than letting it look like the references "didn't work".
+    if source.get("image_refs"):
+        rm = str(source.get("model_type") or "")
+        if not _supports_reference_images(rm):
+            logger.warning(
+                "Job %s: %d reference image(s) supplied but '%s' does not "
+                "support them — they will be ignored. Use a VACE model, the "
+                "LTX-2.3 MSR finetune, or an edit/identity model.",
+                job.get("id"), len(source["image_refs"]), rm,
             )
 
     for key in (
