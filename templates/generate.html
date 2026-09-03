@@ -71,6 +71,15 @@
              stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
       </span>
     </button>
+    <button type="button" data-type="cs" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Character Sheet" aria-label="Character Sheet. Generate a multi-view reference sheet of one character">
+      <img class="type-art" src="/static/img/cards/t2i.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
   </div>
 
   <div id="selected-bar" hidden>
@@ -246,6 +255,22 @@
         Describe each reference in your prompt and say what it provides — e.g.
         “Image 1 is the studio background, Image 2 is the presenter, Image 3 is the product.”
         Without those labels identity consistency drops noticeably.
+      </p>
+    </div>
+
+    <div id="sheet-wrap" class="hidden">
+      <label class="block text-sm font-medium mb-1.5">Sheet layout</label>
+      <select name="sheet_layout" id="sheet-layout"
+        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm">
+        <option value="turnaround">Turnaround — front, ¾, side, back</option>
+        <option value="expressions">Expressions — 6 facial expressions</option>
+        <option value="poses">Poses — 4 full-body poses</option>
+        <option value="full">Full sheet — turnaround + expressions</option>
+      </select>
+      <p class="text-xs text-slate-400 mt-1">
+        Describe only the character in the prompt — layout, white background and
+        consistency wording are added automatically. Output is a wide image on a
+        plain white background, ready to use as a reference for MSR or VACE.
       </p>
     </div>
 
@@ -529,7 +554,7 @@ function isVideoOut() { return ['t2v','i2v','ia2v','v2v','p2v'].includes(current
 function needsImage() { return ['i2v','i2i','ia2v'].includes(currentType) || currentType === 'v2v'; }
 function needsAudio() { return currentType === 'ia2v'; }
 function needsVideo() { return currentType === 'v2v'; }
-function promptRequired() { return ['t2v','t2i'].includes(currentType); }
+function promptRequired() { return ['t2v','t2i','cs'].includes(currentType); }
 
 
 let allModelsCache = [];
@@ -888,8 +913,9 @@ function updateUI() {
     usesControl && !CONTROL_SEED;
 
   const media = document.getElementById('media-panel');
+  const isSheet = currentType === 'cs';
   const showMedia = needsImage() || needsAudio() || needsVideo()
-                    || usesControl || currentType === 'v2v';
+                    || usesControl || isSheet || currentType === 'v2v';
   media.classList.toggle('hidden', !showMedia);
 
   // For pose jobs the image is an optional identity reference, not a start frame
@@ -897,14 +923,21 @@ function updateUI() {
   if (imgLabel) {
     imgLabel.textContent = usesControl
       ? 'Reference image (optional — who or what to render)'
+      : isSheet
+      ? 'Reference photo (optional — base the sheet on this person)'
       : 'Image';
   }
-  document.getElementById('image-req')?.classList.toggle('hidden', usesControl);
+  document.getElementById('image-req')?.classList.toggle('hidden', usesControl || isSheet);
   document.getElementById('image-wrap')
-    .classList.toggle('hidden', !(needsImage() || usesControl || currentType === 'v2v'));
+    .classList.toggle('hidden', !(needsImage() || usesControl || isSheet || currentType === 'v2v'));
   document.getElementById('audio-wrap').classList.toggle('hidden', !needsAudio());
   document.getElementById('video-wrap').classList.toggle('hidden', !needsVideo());
   document.getElementById('end-image-wrap').classList.toggle('hidden', currentType !== 'v2v' && currentType !== 'i2v');
+  document.getElementById('sheet-wrap')?.classList.toggle('hidden', !isSheet);
+  const pEl = document.getElementById('prompt');
+  if (pEl) pEl.placeholder = isSheet
+    ? 'Describe the character — age, build, hair, clothing, distinguishing features…'
+    : 'Describe the motion, style, or scene…';
   updateRefsVisibility();
 
   document.getElementById('prompt-req').classList.toggle('hidden', !promptRequired());

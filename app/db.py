@@ -79,6 +79,7 @@ DEFAULT_SETTINGS = {
     "default_model_p2v": "",
     "default_model_t2i": "",
     "default_model_i2i": "",
+    "default_model_cs": "",
     # Default LoRAs per job type, "filename:weight, ..." — applied when the
     # user supplied none, so Easy mode never has to think about LoRAs.
     "default_loras_t2v": "",
@@ -88,6 +89,7 @@ DEFAULT_SETTINGS = {
     "default_loras_p2v": "",
     "default_loras_t2i": "",
     "default_loras_i2i": "",
+    "default_loras_cs": "",
     "default_resolution": "1280x704",
     "default_steps": 8,
     "default_fps": "24",

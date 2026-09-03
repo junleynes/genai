@@ -83,7 +83,7 @@ class LoginIn(BaseModel):
 
 
 class JobCreateIn(BaseModel):
-    job_type: str = Field(pattern="^(t2v|i2v|t2i|i2i|ia2v|v2v)$")
+    job_type: str = Field(pattern="^(t2v|i2v|t2i|i2i|ia2v|v2v|p2v|cs)$")
     mode: str = Field(pattern="^(easy|advanced)$")
     prompt: str = Field(default="", max_length=4000)
     title: str = ""
@@ -124,6 +124,7 @@ class ServerConfigIn(BaseModel):
     default_model_p2v: Optional[str] = None
     default_model_t2i: Optional[str] = None
     default_model_i2i: Optional[str] = None
+    default_model_cs: Optional[str] = None
     default_loras_t2v: Optional[str] = None
     default_loras_i2v: Optional[str] = None
     default_loras_ia2v: Optional[str] = None
@@ -131,6 +132,7 @@ class ServerConfigIn(BaseModel):
     default_loras_p2v: Optional[str] = None
     default_loras_t2i: Optional[str] = None
     default_loras_i2i: Optional[str] = None
+    default_loras_cs: Optional[str] = None
     default_resolution: str = "1280x704"
     default_steps: int = 8
     default_guidance_scale: float = 7.5
@@ -238,14 +240,14 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
                 (getattr(body, f"default_model_{_jt}") or "").strip()
                 if getattr(body, f"default_model_{_jt}") is not None else None
             )
-            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i")
+            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs")
         },
         **{
             f"default_loras_{_jt}": (
                 (getattr(body, f"default_loras_{_jt}") or "").strip()
                 if getattr(body, f"default_loras_{_jt}") is not None else None
             )
-            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i")
+            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs")
         },
         "default_resolution": (body.default_resolution or "").strip() or "1280x704",
         "default_steps": int(body.default_steps or 8),
@@ -548,6 +550,7 @@ async def create_job(
     reference_images: list[UploadFile] = File(default_factory=list),
     reference_image_library_ids: str = Form(""),
     msr_reference_video_length: Optional[int] = Form(None),
+    sheet_layout: str = Form("turnaround"),
     loras: str = Form(""),
     # Reuse existing library media instead of uploading (ids from /api/library)
     image_library_id: str = Form(""),
@@ -555,7 +558,7 @@ async def create_job(
     video_library_id: str = Form(""),
     end_image_library_id: str = Form(""),
 ):
-    allowed = {"t2v", "i2v", "t2i", "i2i", "ia2v", "v2v", "p2v"}
+    allowed = {"t2v", "i2v", "t2i", "i2i", "ia2v", "v2v", "p2v", "cs"}
     if job_type not in allowed:
         raise HTTPException(400, f"Invalid job_type. Allowed: {sorted(allowed)}")
     if mode not in ("easy", "advanced"):
@@ -656,6 +659,7 @@ async def create_job(
         "control_strength": control_strength,
         "reference_image_paths": reference_image_paths,
         "msr_reference_video_length": msr_reference_video_length,
+        "sheet_layout": sheet_layout if job_type == "cs" else None,
         "loras": loras.strip(),
     }
     if mode == "easy":
@@ -667,8 +671,8 @@ async def create_job(
             params["duration_seconds"] = min(float(params["duration_seconds"]), 5)
 
     prompt_clean = (prompt or "").strip()
-    if not prompt_clean and job_type in ("t2v", "t2i"):
-        raise HTTPException(400, "Prompt is required for text-based generation")
+    if not prompt_clean and job_type in ("t2v", "t2i", "cs"):
+        raise HTTPException(400, "Describe the character" if job_type == "cs" else "Prompt is required for text-based generation")
 
     settings = db.get_settings()
     ok_start, reason = db.can_start_job(user["id"], settings)

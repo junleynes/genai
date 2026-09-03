@@ -293,6 +293,67 @@ def _parse_loras(raw: str) -> tuple[list[str], str]:
     return names, multipliers
 
 
+CHARACTER_SHEET_LAYOUTS = {
+    "turnaround": (
+        "character turnaround sheet, the same character shown four times in a "
+        "single row: front view, three-quarter view, side profile view, and "
+        "back view, identical outfit hair and proportions in every view, "
+        "neutral A-pose, evenly spaced, full body, consistent lighting"
+    ),
+    "expressions": (
+        "character expression sheet, the same face shown six times in a grid: "
+        "neutral, smiling, laughing, surprised, angry, and sad, identical "
+        "features hair and outfit in every panel, head and shoulders framing, "
+        "consistent lighting"
+    ),
+    "poses": (
+        "character pose sheet, the same character shown four times in a single "
+        "row in different full-body poses: standing, walking, gesturing, and "
+        "seated, identical outfit hair and proportions in every pose, "
+        "consistent lighting"
+    ),
+    "full": (
+        "character reference sheet, the same character in one layout: a row of "
+        "front, three-quarter, side and back full-body views above a row of "
+        "four facial expressions, identical outfit hair and proportions "
+        "throughout, neutral A-pose for the body views, consistent lighting"
+    ),
+}
+
+# Reference sheets are consumed by MSR / VACE, both of which want the subject
+# cleanly separated from the background. WanGP's own note is that the MSR LoRA
+# "is quite fond of character sheets with white background".
+_CS_SUFFIX = (
+    "plain pure white seamless background, no scenery, no props, no text, "
+    "no labels, no watermark, even diffuse studio lighting, sharp focus, "
+    "full character visible and not cropped, character sheet layout"
+)
+
+_CS_NEGATIVE = (
+    "cropped, cut off, multiple different characters, inconsistent design, "
+    "changing outfit, changing hairstyle, busy background, scenery, text, "
+    "labels, watermark, signature, harsh shadows, motion blur"
+)
+
+
+def _build_character_sheet_prompt(prompt: str, params: dict) -> tuple[str, str]:
+    """
+    Turn a plain character description into a reference-sheet prompt.
+
+    The user describes who the character is; the layout wording, the white
+    background and the consistency constraints are boilerplate they
+    shouldn't have to remember every time. Returns (prompt, negative).
+    """
+    layout_key = (params.get("sheet_layout") or "turnaround").lower()
+    layout = CHARACTER_SHEET_LAYOUTS.get(layout_key, CHARACTER_SHEET_LAYOUTS["turnaround"])
+    subject = (prompt or "").strip() or "an original character"
+    full = f"{layout}. Character: {subject}. {_CS_SUFFIX}"
+
+    negative = (params.get("negative_prompt") or "").strip()
+    negative = f"{negative}, {_CS_NEGATIVE}" if negative else _CS_NEGATIVE
+    return full, negative
+
+
 def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     params = job.get("params") or {}
     jtype = job.get("job_type", "t2v")
@@ -311,7 +372,7 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
             logger.info("Job %s: auto model -> %s (per-job-type default for %s)",
                         job.get("id"), model, jtype)
         else:
-            if jtype in ("t2i", "i2i"):
+            if jtype in ("t2i", "i2i", "cs"):
                 model = (
                     defaults.get("image_model_type")
                     or defaults.get("model_type")
@@ -329,10 +390,18 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     if video_length is None:
         video_length = _duration_to_frames(duration)
 
+    # A character sheet is an ordinary image generation wrapped in layout and
+    # consistency boilerplate, so build that here rather than making the user
+    # retype it every time.
+    if jtype == "cs":
+        prompt, cs_negative = _build_character_sheet_prompt(prompt, params)
+
     settings: dict[str, Any] = {
         "model_type": str(model),
         "prompt": prompt,
-        "negative_prompt": params.get("negative_prompt") or "",
+        "negative_prompt": (
+            cs_negative if jtype == "cs" else (params.get("negative_prompt") or "")
+        ),
         "resolution": resolution,
         "num_inference_steps": steps,
         "seed": seed,
@@ -465,10 +534,24 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
                 "" if params.get("loras") else " [per-job-type default]",
             )
 
-    if jtype in ("t2i", "i2i"):
+    if jtype in ("t2i", "i2i", "cs"):
         settings["image_mode"] = 1
         settings["video_length"] = 1
         if jtype == "i2i" and image_path:
+            settings["image_start"] = str(image_path)
+
+    if jtype == "cs":
+        # A sheet is several views side by side, so it needs width. Only
+        # override when the user left the default portrait/square value —
+        # an explicit choice is theirs to keep.
+        if not params.get("resolution"):
+            settings["resolution"] = "1920x1080"
+        # An input photo defines who the character is, so it is a reference
+        # rather than a starting canvas to be redrawn.
+        if image_path and _supports_reference_images(str(settings.get("model_type") or "")):
+            settings["image_refs"] = [str(image_path)]
+            settings.pop("image_start", None)
+        elif image_path:
             settings["image_start"] = str(image_path)
 
     quality = (params.get("quality") or "balanced").lower()
@@ -982,7 +1065,7 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         "force_fps": settings_cfg.get("default_fps") or "24",
     }
     # Per-job-type model/LoRA defaults, so Easy mode can hide both pickers.
-    for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i"):
+    for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs"):
         mv = (settings_cfg.get(f"default_model_{_jt}") or "").strip()
         if mv:
             defaults[f"model_{_jt}"] = mv
@@ -2353,6 +2436,7 @@ _JOB_TYPE_FILTERS = {
     "v2v": {"main_output": "video", "inputs": "video"},
     "t2i": {"main_output": "image"},
     "i2i": {"main_output": "image", "inputs": "image"},
+    "cs": {"main_output": "image"},   # character sheet: a wide reference image
     # Pose/control-driven video needs a VACE-style model that accepts a guide
     "p2v": {"main_output": "video", "inputs": "video"},
 }
@@ -2440,7 +2524,7 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
         inp = [str(x).lower() for x in (m.get("inputs") or [])]
         blob = f"{m.get('model_type','')} {m.get('name','')} {m.get('family','')}".lower()
         s = 0
-        if job_type in ("t2i", "i2i"):
+        if job_type in ("t2i", "i2i", "cs"):
             if "image" in mo:
                 s += 3
             if "video" in mo and "image" not in mo:
@@ -2480,7 +2564,7 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
     # Hard filter on output media: an image job must never be offered a
     # video model (and vice versa). Scoring alone only pushed them down the
     # list, so they still appeared and could be picked by mistake.
-    wants = "image" if job_type in ("t2i", "i2i") else "video"
+    wants = "image" if job_type in ("t2i", "i2i", "cs") else "video"
 
     def produces(m: dict) -> Optional[str]:
         mo = [str(x).lower() for x in (m.get("main_output") or [])]
