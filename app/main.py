@@ -545,6 +545,9 @@ async def create_job(
     control_type: str = Form("pose"),
     control_strength: Optional[float] = Form(None),
     control_video_library_id: str = Form(""),
+    reference_images: list[UploadFile] = File(default_factory=list),
+    reference_image_library_ids: str = Form(""),
+    msr_reference_video_length: Optional[int] = Form(None),
     loras: str = Form(""),
     # Reuse existing library media instead of uploading (ids from /api/library)
     image_library_id: str = Form(""),
@@ -614,6 +617,26 @@ async def create_job(
     end_image_url = await save_upload(end_image, "end") or lib_end_image
     control_video_url = await save_upload(control_video, "ctl") or lib_control
 
+    # Ordered reference images. Both VACE and LTX-2.3 MSR use the same
+    # convention: background/setting first, then subjects and objects, so the
+    # order the user arranged them in is meaningful and must be preserved.
+    reference_image_paths: list[str] = []
+    for idx, uf in enumerate(reference_images or []):
+        saved = await save_upload(uf, f"ref{idx}")
+        if saved:
+            reference_image_paths.append(saved)
+    for lid in [s.strip() for s in (reference_image_library_ids or "").split(",") if s.strip()]:
+        lib_ref = from_library(lid, "image")
+        if lib_ref:
+            reference_image_paths.append(lib_ref)
+    # MSR tops out at 5; more would be silently dropped by WanGP.
+    if len(reference_image_paths) > 5:
+        raise HTTPException(
+            400,
+            f"Too many reference images ({len(reference_image_paths)}). "
+            "Multi-subject reference supports up to 5.",
+        )
+
     params = {
         "resolution": resolution,
         "steps": steps,
@@ -631,6 +654,8 @@ async def create_job(
         "control_video_url": control_video_url,
         "control_type": control_type if control_video_url else None,
         "control_strength": control_strength,
+        "reference_image_paths": reference_image_paths,
+        "msr_reference_video_length": msr_reference_video_length,
         "loras": loras.strip(),
     }
     if mode == "easy":

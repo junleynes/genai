@@ -336,6 +336,19 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     if jtype == "ia2v" and audio_path:
         settings["audio_guide"] = str(audio_path)
         settings["audio_prompt_type"] = "A"
+    # ── Reference images ──────────────────────────────────────────────────
+    # Both VACE and LTX-2.3 MSR take an ordered list, and both use the same
+    # convention: background/setting first, then subjects and objects. MSR
+    # accepts 2-5; VACE has no fixed cap. Falls back to the single legacy
+    # image_path so older jobs (and Reuse) keep working.
+    ref_paths: list[str] = []
+    for p in (params.get("reference_image_paths") or []):
+        rp = _resolve_local_media(p) or p
+        if rp:
+            ref_paths.append(str(rp))
+    if not ref_paths and image_path:
+        ref_paths = [str(image_path)]
+
     # ── Pose / control-guided generation ──────────────────────────────────
     # A driving video supplies motion; the model follows its pose, depth or
     # edges rather than the guide's appearance. Available as its own job type
@@ -350,9 +363,9 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
         settings["video_guide"] = str(control_path)
         letter = _control_letter(control_type)
         settings["video_prompt_type"] = f"V{letter}"
-        # A reference image still drives identity/appearance when supplied.
-        if image_path:
-            settings["image_refs"] = [str(image_path)]
+        # Reference images still drive identity/appearance when supplied.
+        if ref_paths:
+            settings["image_refs"] = ref_paths
             settings["video_prompt_type"] = f"V{letter}I"
             # image_start would pin frame one to the reference and fight the
             # guide's first pose, so it is deliberately not set here.
@@ -370,8 +383,23 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
             if params.get(key) is not None:
                 settings[target] = params[key]
         logger.info(
-            "Job %s: %s-guided generation (video_prompt_type=%s)",
-            job.get("id"), control_type, settings["video_prompt_type"],
+            "Job %s: %s-guided generation (video_prompt_type=%s, %d ref image(s))",
+            job.get("id"), control_type, settings["video_prompt_type"], len(ref_paths),
+        )
+    elif len(ref_paths) > 1 and jtype in ("t2v", "i2v", "t2i", "i2i"):
+        # Reference-to-video with no driving video: LTX-2.3 MSR packs 2-5
+        # reference images (background first, then subjects/objects) into a
+        # pseudo-video sequence. VACE reference-to-video works the same way.
+        # A start frame would compete with the references for frame one, so
+        # drop it in favour of the reference set.
+        settings["image_refs"] = ref_paths
+        settings.pop("image_start", None)
+        settings.pop("image_prompt_type", None)
+        if msr_ref_len := params.get("msr_reference_video_length"):
+            settings["MSR_reference_video_length"] = msr_ref_len
+        logger.info(
+            "Job %s: multi-reference generation with %d images",
+            job.get("id"), len(ref_paths),
         )
 
     # ── LoRAs ─────────────────────────────────────────────────────────────

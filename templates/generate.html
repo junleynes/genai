@@ -219,6 +219,31 @@
       </div>
     </div>
 
+    <div id="refs-wrap" class="hidden">
+      <label class="block text-sm font-medium mb-1.5">
+        Reference images <span class="text-slate-400">(optional — up to 5)</span>
+      </label>
+      <div id="refs-list" class="space-y-2"></div>
+      <div class="flex items-center gap-2 mt-2">
+        <button type="button" onclick="document.getElementById('refs-file-input').click()"
+          class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
+          + Add reference
+        </button>
+        <span id="refs-count" class="text-xs text-slate-400"></span>
+      </div>
+      <input type="file" id="refs-file-input" accept="image/png,image/jpeg,image/webp" multiple class="hidden" />
+      <p class="text-xs text-slate-400 mt-2">
+        <strong>Order matters:</strong> background / setting first, then subjects and objects.
+        Both VACE and LTX-2.3 MSR read the list in that order. Subject and object cutouts
+        work best on a plain white background.
+      </p>
+      <p id="refs-msr-hint" class="text-xs text-amber-600 dark:text-amber-400 mt-1 hidden">
+        Describe each reference in your prompt and say what it provides — e.g.
+        “Image 1 is the studio background, Image 2 is the presenter, Image 3 is the product.”
+        Without those labels identity consistency drops noticeably.
+      </p>
+    </div>
+
     <div>
       <label class="block text-sm font-medium mb-1.5">Prompt <span id="prompt-req" class="text-red-500">*</span></label>
       <textarea name="prompt" id="prompt" rows="4" placeholder="Describe the motion, style, or scene…"
@@ -640,6 +665,69 @@ function syncLorasHidden() {
   hidden.value = parts.join(', ');
 }
 
+// ── Reference images (VACE + LTX-2.3 MSR) ──────────────────────────────
+// An ordered list: background/setting first, then subjects and objects.
+// Order is meaningful to both models, so the UI must let the user reorder
+// and must submit in exactly the order shown.
+let REFS = [];           // { file, url, name } — uploads
+const REFS_MAX = 5;
+
+function renderRefs() {
+  const list = document.getElementById('refs-list');
+  const count = document.getElementById('refs-count');
+  if (!list) return;
+  list.innerHTML = '';
+  REFS.forEach((r, i) => {
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-2 p-2 rounded-xl border border-slate-200 dark:border-slate-800';
+    row.innerHTML = `
+      <img src="${r.url}" class="w-12 h-12 object-cover rounded-lg border border-slate-200 dark:border-slate-700" alt="" />
+      <div class="flex-1 min-w-0">
+        <p class="text-xs font-medium truncate">${r.name}</p>
+        <p class="text-[10px] ${i === 0 ? 'text-brand font-medium' : 'text-slate-400'}">
+          ${i === 0 ? 'Image 1 — background / setting' : 'Image ' + (i + 1) + ' — subject / object'}
+        </p>
+      </div>
+      <button type="button" onclick="moveRef(${i},-1)" ${i === 0 ? 'disabled' : ''}
+        class="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 disabled:opacity-30">↑</button>
+      <button type="button" onclick="moveRef(${i},1)" ${i === REFS.length - 1 ? 'disabled' : ''}
+        class="px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-700 disabled:opacity-30">↓</button>
+      <button type="button" onclick="removeRef(${i})"
+        class="px-1.5 py-0.5 text-xs rounded text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30">×</button>
+    `;
+    list.appendChild(row);
+  });
+  if (count) count.textContent = REFS.length ? `${REFS.length} of ${REFS_MAX}` : '';
+  // MSR needs 2+ references and per-image prompt labels to work well.
+  document.getElementById('refs-msr-hint')?.classList.toggle('hidden', REFS.length < 2);
+}
+
+function moveRef(i, d) {
+  const j = i + d;
+  if (j < 0 || j >= REFS.length) return;
+  [REFS[i], REFS[j]] = [REFS[j], REFS[i]];
+  renderRefs();
+}
+
+function removeRef(i) {
+  const r = REFS[i];
+  if (r && r.url.startsWith('blob:')) URL.revokeObjectURL(r.url);
+  REFS.splice(i, 1);
+  renderRefs();
+}
+
+document.getElementById('refs-file-input')?.addEventListener('change', (e) => {
+  for (const f of e.target.files) {
+    if (REFS.length >= REFS_MAX) {
+      toast(`Up to ${REFS_MAX} reference images`, 'error');
+      break;
+    }
+    REFS.push({ file: f, url: URL.createObjectURL(f), name: f.name });
+  }
+  e.target.value = '';  // allow re-picking the same file
+  renderRefs();
+});
+
 function inferFamily(m) {
   if (m.family && String(m.family).trim()) return String(m.family).trim();
   const mt = String(m.model_type || '').toLowerCase();
@@ -774,6 +862,11 @@ function updateUI() {
   document.getElementById('audio-wrap').classList.toggle('hidden', !needsAudio());
   document.getElementById('video-wrap').classList.toggle('hidden', !needsVideo());
   document.getElementById('end-image-wrap').classList.toggle('hidden', currentType !== 'v2v' && currentType !== 'i2v');
+  // Reference images: VACE (with a driving video) and LTX-2.3 MSR
+  // (reference-to-video, no driving video) both consume an ordered list.
+  document.getElementById('refs-wrap')?.classList.toggle(
+    'hidden', !['p2v', 't2v', 'i2v', 't2i', 'i2i'].includes(currentType)
+  );
 
   document.getElementById('prompt-req').classList.toggle('hidden', !promptRequired());
   document.getElementById('prompt').required = promptRequired();
@@ -884,6 +977,11 @@ document.getElementById('gen-form').addEventListener('submit', async (e) => {
   const fd = new FormData(form);
   fd.set('job_type', currentType);
   fd.set('mode', currentMode);
+
+  // Reference images, appended in the exact order shown — background first,
+  // then subjects/objects. Both VACE and MSR depend on that ordering.
+  fd.delete('reference_images');
+  REFS.forEach(r => fd.append('reference_images', r.file, r.file.name));
 
   if (CONTROL_SEED) {
     fd.set('control_video_library_id', CONTROL_SEED.id);
