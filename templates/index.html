@@ -59,7 +59,7 @@
           {{ settings.tagline }}
         </h1>
         <p class="mt-6 text-lg text-slate-600 dark:text-slate-300 max-w-lg leading-relaxed">
-          Text, image, audio, pose, and video in — cinematic clips out. Easy mode for speed, Advanced for control. Everything you make is saved to your personal library, ready to reuse.
+          A web frontend for Wan2GP: text, image, audio, pose, and video in — clips and stills out. Ten generation modes, Easy for speed and Advanced for full control. Everything you make is saved to your personal library, ready to reuse.
         </p>
         <div class="mt-8 flex flex-wrap gap-3">
           <a href="/generate" class="btn-brand px-6 py-3 rounded-xl font-semibold shadow-lg shadow-indigo-500/25 hover:scale-[1.02] transition inline-flex items-center gap-2">
@@ -71,9 +71,9 @@
           </a>
         </div>
         <div class="mt-10 flex flex-wrap gap-x-6 gap-y-3 text-sm text-slate-500 dark:text-slate-400">
+          <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> Face swap &amp; multi-subject</div>
           <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> Pose-driven video</div>
-          <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> Image+Audio → Video</div>
-          <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> Video restyling</div>
+          <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> Character sheets</div>
           <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> Personal library</div>
         </div>
       </div>
@@ -101,7 +101,7 @@
         <!-- Floating badge -->
         <div class="absolute -bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-white dark:bg-slate-900 shadow-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold flex items-center gap-2 whitespace-nowrap">
           <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          9 generation modes · Easy &amp; Advanced
+          10 generation modes · Easy &amp; Advanced
         </div>
       </div>
     </div>
@@ -113,7 +113,7 @@
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="text-center max-w-2xl mx-auto mb-12">
       <h2 class="text-2xl sm:text-3xl font-bold tracking-tight">Everything you need to create</h2>
-      <p class="mt-3 text-slate-600 dark:text-slate-400">Nine generation modes, one workspace — from a text prompt to a full audiovisual pipeline.</p>
+      <p class="mt-3 text-slate-600 dark:text-slate-400">Ten generation modes, one workspace — from a text prompt to face swap, multi-subject scenes, and character sheets.</p>
     </div>
     <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
       <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
@@ -204,6 +204,17 @@
         <div class="p-5">
           <h3 class="font-semibold text-lg">Multi-Subject Reference → Video</h3>
           <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Compose a scene from 2–5 reference images — background first, then characters and objects. Powered by LTX-2.3 MSR.</p>
+        </div>
+      </div>
+
+      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
+        <div class="relative overflow-hidden bg-slate-900" style="aspect-ratio: 1168 / 784;">
+          <img src="/static/img/cards/cs.jpg" alt="" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
+          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/60 text-white backdrop-blur-sm">CS · New</span>
+        </div>
+        <div class="p-5">
+          <h3 class="font-semibold text-lg">Character Sheet</h3>
+          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Generate a multi-view reference sheet of one character — ideal identity stills for MSR, VACE, or further edits.</p>
         </div>
       </div>
       <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
