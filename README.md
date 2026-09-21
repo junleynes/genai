@@ -29,6 +29,14 @@ Modern web frontend for **Wan2GP** (WanGP): generate video and images through a 
 | Text → Image | `t2i` | image | prompt |
 | Image → Image | `i2i` | image | reference image + prompt |
 | Character Sheet | `cs` | image | prompt (+ optional identity photo) |
+| Ingredients → Video | `ingredients` | video | reference sheet image (LTX IC-LoRA) |
+| In / Outpaint | `outpaint` | video | source video (LTX IC-LoRA) |
+| Clean Plate | `cleanplate` | video | source video (LTX IC-LoRA) |
+| Relight | `relight` | video | source video (LTX IC-LoRA) |
+| Day → Night | `daynight` | video | source video (LTX IC-LoRA) |
+| Colorize | `colorize` | video | B&W source video (LTX IC-LoRA) |
+| Upscale | `upscale` | video | source video (LTX spatial upscaler IC-LoRA) |
+| Foley | `foley` | audio | silent source video (LTX Foley V2A) |
 
 Easy mode uses sensible defaults; Advanced exposes models, LoRAs, steps, guidance, control strength, and more.
 

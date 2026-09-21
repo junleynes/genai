@@ -266,6 +266,20 @@ CS_MODEL_PREFERENCE = (
     "identity", "edit", "bernini", "msr", "vace", "phantom", "animate", "lynx",
 )
 
+# LTX-2.3 Creative Lab IC-LoRAs (filename keywords). Used when the user picks
+# a dedicated creative-lab job type so Auto activates the matching adapter.
+CREATIVE_LAB_LORA = {
+    "ingredients": ("ingredients", "ingredient"),
+    "outpaint": ("in-outpainting", "outpaint", "inpaint"),
+    "cleanplate": ("clean-plate", "clean_plate", "cleanplate"),
+    "relight": ("relight",),
+    "daynight": ("day-to-night", "day_to_night", "daytonight"),
+    "colorize": ("colorization", "colorize"),
+    "upscale": ("spatial-upscaler", "spatial_upscaler", "upscaler", "pixel-spatial"),
+    "foley": ("foley", "v2a"),
+}
+CREATIVE_LAB_TYPES = tuple(CREATIVE_LAB_LORA.keys())
+
 
 def _normalize_lora_list(raw: Any) -> list[dict]:
     """Accept the various shapes a LoRA-listing tool might return."""
@@ -581,6 +595,18 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     if jtype == "v2v" and video_path:
         settings["video_source"] = str(video_path)
         settings["image_prompt_type"] = "V"
+    # LTX Creative Lab modes are specialized video transforms (IC-LoRA).
+    if jtype in CREATIVE_LAB_TYPES:
+        if video_path:
+            settings["video_source"] = str(video_path)
+            settings["image_prompt_type"] = "V"
+        if jtype == "ingredients" and image_path:
+            # Reference sheet drives identity; optional start frame via image_start
+            settings["image_refs"] = [str(image_path)]
+            settings.pop("image_start", None)
+        elif image_path and jtype != "ingredients":
+            settings["image_start"] = str(image_path)
+            settings["image_prompt_type"] = settings.get("image_prompt_type") or "S"
     if jtype == "fs":
         # Face Swap: the input image is the identity to transplant, the source
         # video is what gets reshot. Identity travels through image_refs,
@@ -1233,7 +1259,7 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         "force_fps": settings_cfg.get("default_fps") or "24",
     }
     # Per-job-type model/LoRA defaults, so Easy mode can hide both pickers.
-    for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr"):
+    for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr", *CREATIVE_LAB_TYPES):
         mv = (settings_cfg.get(f"default_model_{_jt}") or "").strip()
         if mv:
             defaults[f"model_{_jt}"] = mv
@@ -1241,6 +1267,77 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         if lv:
             defaults[f"loras_{_jt}"] = lv
     source = _map_job_to_settings(job, defaults)
+
+    # ── LTX Creative Lab IC-LoRA modes ─────────────────────────────────────
+    # These job types are specialized video transforms. Prefer an LTX-2.3
+    # Distilled checkpoint and activate the matching Creative Lab adapter when
+    # the catalogue exposes it.
+    jtype_early = job.get("job_type", "t2v")
+    if jtype_early in CREATIVE_LAB_TYPES:
+        params = job.get("params") or {}
+        requested = params.get("model_type") or params.get("model")
+        explicit = bool(requested) and requested not in ("auto", "")
+        current = str(source.get("model_type") or "")
+        blob = current.lower()
+        if not explicit and "ltx" not in blob:
+            # Prefer distilled LTX for IC-LoRA workflows
+            try:
+                models = list_models_for_job_type(mcp_url, "v2v", limit=200)
+            except Exception:
+                models = []
+            ltx = [
+                m for m in models
+                if any(k in f"{m.get('model_type','')} {m.get('name','')}".lower()
+                       for k in ("ltx2", "ltx-2", "ltx_2", "ltx 2"))
+            ]
+            def _ltx_rank(m):
+                b = f"{m.get('model_type','')} {m.get('name','')}".lower()
+                if "distill" in b:
+                    return 3
+                if "22b" in b or "22B" in str(m.get("name") or ""):
+                    return 2
+                return 1
+            if ltx:
+                picked = sorted(ltx, key=_ltx_rank, reverse=True)[0].get("model_type")
+                if picked:
+                    source["model_type"] = picked
+                    logger.info(
+                        "Job %s: Creative Lab '%s' using LTX model '%s'",
+                        job.get("id"), jtype_early, picked,
+                    )
+        # Activate matching IC-LoRA if user did not pick one
+        if not source.get("activated_loras"):
+            keywords = CREATIVE_LAB_LORA.get(jtype_early) or ()
+            try:
+                available, _ = list_loras_for_model(
+                    mcp_url, str(source.get("model_type") or "")
+                )
+            except Exception:
+                available = []
+            match = None
+            for item in available or []:
+                name = ""
+                if isinstance(item, dict):
+                    name = str(item.get("name") or item.get("path") or item.get("file") or "")
+                else:
+                    name = str(item)
+                low = name.lower()
+                if any(k in low for k in keywords):
+                    match = name
+                    break
+            if match:
+                source["activated_loras"] = [match]
+                source["loras_multipliers"] = ["1.0"]
+                logger.info(
+                    "Job %s: Creative Lab '%s' activating LoRA '%s'",
+                    job.get("id"), jtype_early, match,
+                )
+            else:
+                logger.warning(
+                    "Job %s: Creative Lab '%s' — no matching IC-LoRA found on WanGP "
+                    "(looked for %s). Install the Lightricks adapter or pick it manually.",
+                    job.get("id"), jtype_early, keywords,
+                )
 
     # ── Guide-capable model enforcement ───────────────────────────────────
     # A guide video only does anything on a VACE-style model. "Auto" used to
@@ -2728,6 +2825,14 @@ _JOB_TYPE_FILTERS = {
     "t2i": {"main_output": "image"},
     "i2i": {"main_output": "image", "inputs": "image"},
     "cs": {"main_output": "image"},   # character sheet: a wide reference image
+    "ingredients": {"main_output": "video"},  # LTX IC-LoRA reference sheet → video
+    "outpaint": {"main_output": "video"},
+    "cleanplate": {"main_output": "video"},
+    "relight": {"main_output": "video"},
+    "daynight": {"main_output": "video"},
+    "colorize": {"main_output": "video"},
+    "upscale": {"main_output": "video"},
+    "foley": {"main_output": "audio"},  # video → foley audio (WanGP may return av)
     # Pose/control-driven video needs a VACE-style model that accepts a guide
     "p2v": {"main_output": "video", "inputs": "video"},
     # Face swap: identity reference image onto a source video. Needs an
@@ -2849,7 +2954,7 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
                 s += 4
             if "video" in inp:
                 s += 2
-        elif job_type in ("t2v", "i2v", "ia2v", "v2v", "fs", "msr"):
+        elif job_type in ("t2v", "i2v", "ia2v", "v2v", "fs", "msr") or job_type in CREATIVE_LAB_TYPES:
             if "video" in mo:
                 s += 3
             if "image" in mo and "video" not in mo:

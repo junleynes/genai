@@ -98,6 +98,85 @@
              stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
       </span>
     </button>
+    <button type="button" data-type="ingredients" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Ingredients → Video" aria-label="Ingredients to Video. Animate a reference sheet of characters props and location">
+      <img class="type-art" src="/static/img/cards/ingredients.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="outpaint" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="In / Outpaint → Video" aria-label="Video inpainting and outpainting with LTX IC-LoRA">
+      <img class="type-art" src="/static/img/cards/outpaint.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="cleanplate" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Clean Plate → Video" aria-label="Remove people or objects to create an empty background plate">
+      <img class="type-art" src="/static/img/cards/cleanplate.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="relight" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Relight → Video" aria-label="Change the lighting of an existing video">
+      <img class="type-art" src="/static/img/cards/relight.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="daynight" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Day → Night" aria-label="Relight daytime footage into night">
+      <img class="type-art" src="/static/img/cards/daynight.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="colorize" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Colorize → Video" aria-label="Colorize black and white video">
+      <img class="type-art" src="/static/img/cards/colorize.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="upscale" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Upscale → Video" aria-label="Generative 2x or 4x video upscale">
+      <img class="type-art" src="/static/img/cards/upscale.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="foley" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Foley → Audio" aria-label="Generate synchronized foley sound effects from silent video">
+      <img class="type-art" src="/static/img/cards/foley.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
   </div>
 
   <div id="selected-bar" hidden>
@@ -570,11 +649,13 @@ if (!requireAuth()) throw new Error('auth');
 let currentType = null;   // nothing chosen until a card is clicked
 let currentMode = 'easy';
 
-function isVideoOut() { return ['t2v','i2v','ia2v','v2v','p2v','fs','msr'].includes(currentType); }
-function needsImage() { return ['i2v','i2i','ia2v'].includes(currentType) || ['v2v','fs'].includes(currentType); }
+function isVideoOut() { return ['t2v','i2v','ia2v','v2v','p2v','fs','msr','ingredients','outpaint','cleanplate','relight','daynight','colorize','upscale'].includes(currentType); }
+function isCreativeLab() { return ['ingredients','outpaint','cleanplate','relight','daynight','colorize','upscale','foley'].includes(currentType); }
+function isCreativeVideo() { return ['outpaint','cleanplate','relight','daynight','colorize','upscale','foley'].includes(currentType); }
+function needsImage() { return ['i2v','i2i','ia2v','fs','ingredients'].includes(currentType); }
 function needsAudio() { return currentType === 'ia2v'; }
-function needsVideo() { return currentType === 'v2v' || currentType === 'fs'; }
-function promptRequired() { return ['t2v','t2i','msr'].includes(currentType); }
+function needsVideo() { return ['v2v','fs'].includes(currentType) || isCreativeVideo(); }
+function promptRequired() { return ['t2v','t2i','msr'].includes(currentType); } // creative lab optional
 function isFaceSwap() { return currentType === 'fs'; }
 
 
@@ -950,7 +1031,7 @@ function updateUI() {
   const media = document.getElementById('media-panel');
   const isSheet = currentType === 'cs';
   const showMedia = needsImage() || needsAudio() || needsVideo()
-                    || usesControl || isSheet || currentType === 'v2v';
+                    || usesControl || isSheet || currentType === 'v2v' || isCreativeLab();
   media.classList.toggle('hidden', !showMedia);
 
   // For pose jobs the image is an optional identity reference, not a start frame
@@ -963,21 +1044,28 @@ function updateUI() {
       ? 'Face reference (whose face appears — required)'
       : isSheet
       ? 'Reference photo (use an identity/edit model — plain Flux will not match the face)'
+      : currentType === 'ingredients'
+      ? 'Reference sheet (characters, props, location — required)'
       : 'Image';
   }
-  document.getElementById('image-req')?.classList.toggle('hidden', usesControl || isSheet);
+  document.getElementById('image-req')?.classList.toggle('hidden', usesControl || isSheet || currentType === 'ingredients');
   document.getElementById('image-wrap')
-    .classList.toggle('hidden', !(needsImage() || usesControl || isSheet || currentType === 'v2v'));
+    .classList.toggle('hidden', !(needsImage() || usesControl || isSheet || currentType === 'v2v' || currentType === 'ingredients'));
   document.getElementById('audio-wrap').classList.toggle('hidden', !needsAudio());
   document.getElementById('video-wrap').classList.toggle('hidden', !needsVideo());
   const vidLabel = document.getElementById('video-label');
-  if (vidLabel) vidLabel.textContent = isSwap ? 'Source video (whose face gets replaced — required)' : 'Video';
+  if (vidLabel) vidLabel.textContent = isSwap ? 'Source video (whose face gets replaced — required)'
+    : isCreativeVideo() ? 'Source video (required)' : 'Video';
   document.getElementById('end-image-wrap').classList.toggle('hidden', currentType !== 'v2v' && currentType !== 'i2v');
   document.getElementById('sheet-wrap')?.classList.toggle('hidden', !isSheet);
   const pEl = document.getElementById('prompt');
   if (pEl) {
     pEl.placeholder = isSheet
       ? 'Optional if you uploaded a photo — otherwise describe age, build, hair, clothing…'
+      : currentType === 'ingredients'
+      ? 'Describe the action — characters and props come from the reference sheet'
+      : isCreativeLab()
+      ? 'Optional — describe the desired look or leave blank to keep the source'
       : currentType === 'msr'
       ? 'Describe the scene — name each reference in order: “Image 1 is the background, Image 2 is the presenter…”'
       : isSwap
@@ -989,7 +1077,7 @@ function updateUI() {
   document.getElementById('prompt-req').classList.toggle('hidden', !promptRequired());
   document.getElementById('prompt').required = promptRequired();
   document.getElementById('image-input').required =
-    ['i2v','i2i','ia2v','fs'].includes(currentType)
+    ['i2v','i2i','ia2v','fs','ingredients'].includes(currentType)
     && !(typeof LIBRARY_SEED !== 'undefined' && LIBRARY_SEED);
   document.getElementById('audio-input').required = needsAudio();
   document.getElementById('video-input').required = needsVideo();

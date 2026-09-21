@@ -100,7 +100,7 @@ class LoginIn(BaseModel):
 
 
 class JobCreateIn(BaseModel):
-    job_type: str = Field(pattern="^(t2v|i2v|t2i|i2i|ia2v|v2v|p2v|cs|fs|msr)$")
+    job_type: str = Field(pattern="^(t2v|i2v|t2i|i2i|ia2v|v2v|p2v|cs|fs|msr|ingredients|outpaint|cleanplate|relight|daynight|colorize|upscale|foley)$")
     mode: str = Field(pattern="^(easy|advanced)$")
     prompt: str = Field(default="", max_length=4000)
     title: str = ""
@@ -263,14 +263,14 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
                 (getattr(body, f"default_model_{_jt}") or "").strip()
                 if getattr(body, f"default_model_{_jt}") is not None else None
             )
-            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr")
+            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr", "ingredients", "outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley")
         },
         **{
             f"default_loras_{_jt}": (
                 (getattr(body, f"default_loras_{_jt}") or "").strip()
                 if getattr(body, f"default_loras_{_jt}") is not None else None
             )
-            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr")
+            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr", "ingredients", "outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley")
         },
         "default_resolution": (body.default_resolution or "").strip() or "1280x704",
         "default_steps": int(body.default_steps or 8),
@@ -721,7 +721,7 @@ async def api_loras(
     if not resolved:
         per_type = (
             settings.get(f"default_model_{job_type}") or ""
-            if job_type in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr")
+            if job_type in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr", "ingredients", "outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley")
             else ""
         )
         resolved = (per_type or "").strip() or (settings.get("default_model_type") or "").strip()
@@ -784,7 +784,7 @@ async def create_job(
     video_library_id: str = Form(""),
     end_image_library_id: str = Form(""),
 ):
-    allowed = {"t2v", "i2v", "t2i", "i2i", "ia2v", "v2v", "p2v", "cs", "fs", "msr"}
+    allowed = {"t2v", "i2v", "t2i", "i2i", "ia2v", "v2v", "p2v", "cs", "fs", "msr", "ingredients", "outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley"}
     if job_type not in allowed:
         raise HTTPException(400, f"Invalid job_type. Allowed: {sorted(allowed)}")
     if mode not in ("easy", "advanced"):
@@ -824,6 +824,11 @@ async def create_job(
         raise HTTPException(400, "Audio is required for Image+Audio → Video")
     if job_type == "v2v" and not video and not image and not lib_video and not lib_image:
         raise HTTPException(400, "Video or start image is required for Video → Video")
+    if job_type == "ingredients" and not image and not lib_image:
+        raise HTTPException(400, "A reference sheet image is required for Ingredients")
+    if job_type in ("outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley"):
+        if not video and not lib_video:
+            raise HTTPException(400, f"A source video is required for {job_type}")
     if job_type == "fs" and not image and not lib_image:
         raise HTTPException(400, "A face reference image is required for Face Swap")
     if job_type == "fs" and not video and not lib_video:
@@ -903,7 +908,7 @@ async def create_job(
         # the broadcast preset legitimately needs more than 25.
         params["steps"] = min(params["steps"], 40)
         params["resolution"] = params.get("resolution") or "832x480"
-        if job_type in ("t2v", "i2v", "ia2v", "v2v", "p2v", "fs", "msr"):
+        if job_type in ("t2v", "i2v", "ia2v", "v2v", "p2v", "fs", "msr", "ingredients", "outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley"):
             params["duration_seconds"] = min(float(params["duration_seconds"]), 5)
 
     prompt_clean = (prompt or "").strip()
