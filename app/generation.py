@@ -158,6 +158,54 @@ def _pick_control_model(mcp_url: str, requested: str | None = None) -> Optional[
     return best.get("model_type")
 
 
+def _pick_pose_identity_model(
+    mcp_url: str,
+    requested: str | None = None,
+) -> Optional[str]:
+    """
+    Model that can BOTH follow a driving video AND honour a reference image
+    (identity / background). Plain LTX-2 Distilled + control LoRA only does
+    the first half — pose without likeness. Prefer VACE / Animate / Lynx.
+    """
+    try:
+        models = list_models_for_job_type(mcp_url, "p2v", limit=200)
+    except Exception:
+        logger.exception("could not list models for pose+identity resolution")
+        return None
+
+    capable = [
+        m for m in models
+        if _is_control_capable(m.get("model_type", ""), m.get("name", ""), m.get("family", ""))
+        and _supports_reference_images(
+            m.get("model_type", ""), m.get("name", ""), m.get("family", "")
+        )
+    ]
+    if not capable:
+        return None
+
+    if requested:
+        for m in capable:
+            if m.get("model_type") == requested:
+                return requested
+
+    def rank(m: dict) -> int:
+        blob = f"{m.get('model_type','')} {m.get('name','')} {m.get('family','')}".lower()
+        if "vace" in blob and "lynx" in blob:
+            return 6
+        if "vace" in blob:
+            return 5
+        if "animate" in blob or "scail" in blob:
+            return 4
+        if "lynx" in blob or "standin" in blob or "phantom" in blob:
+            return 3
+        if "msr" in blob:
+            return 2
+        return 1
+
+    best = sorted(capable, key=rank, reverse=True)[0]
+    return best.get("model_type")
+
+
 def _pick_reference_model(
     mcp_url: str,
     job_type: str,
@@ -1243,6 +1291,41 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 "(default_loras_p2v) or pick one on the Generate page.",
                 job.get("id"), final_model,
             )
+
+        # Pose + reference image: need a model that reads image_refs for
+        # identity/background. LTX-2 Distilled + control LoRA only follows
+        # the guide pose — the reference face and scene are ignored, which
+        # looks like "plain dancing video of a stranger". Prefer VACE /
+        # Animate; fail loudly on an explicit non-capable pick.
+        if source.get("image_refs"):
+            final_model = str(source.get("model_type") or "")
+            if not _supports_reference_images(final_model):
+                picked = _pick_pose_identity_model(
+                    mcp_url, requested if explicit else None
+                )
+                if explicit:
+                    hint = f" (e.g. '{picked}')" if picked else ""
+                    raise RuntimeError(
+                        f"Model '{final_model}' can follow the driving video but "
+                        "cannot preserve identity from the reference image — "
+                        "plain LTX-2 Distilled only does pose, not likeness. "
+                        f"Use a VACE or Animate model{hint}, or set Model to Auto."
+                    )
+                if picked and picked != final_model:
+                    logger.info(
+                        "Job %s: '%s' follows pose but not identity refs; "
+                        "switching to '%s' for pose+reference",
+                        job.get("id"), final_model, picked,
+                    )
+                    source["model_type"] = picked
+                elif not picked:
+                    raise RuntimeError(
+                        "A reference image was supplied for pose-driven generation, "
+                        "but this WanGP install has no model that does both pose "
+                        "control and identity references (need VACE, VACE Lynx, "
+                        "or Wan Animate). Without one, only the dance motion is "
+                        "kept and the person/background from the photo are lost."
+                    )
 
     # ── Reference-capable model enforcement (fs / msr) ───────────────────
     # Face swap and Multi-Subject Reference only *do* something on models that

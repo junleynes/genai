@@ -611,7 +611,7 @@ function fillModelSelect(models) {
     const total = (models || []).length;
     const shown = list.length;
     const suffix = currentType === 'p2v'
-      ? ' — VACE-style or LTX-2 models only (LTX-2 also needs a pose/depth IC LoRA)'
+      ? ' — pose only: LTX-2 + control LoRA; identity+pose: VACE / Animate (LTX Distilled ignores the reference face)'
       : currentType === 'fs'
       ? ' — identity/reference-capable video models only (face swap needs them)'
       : currentType === 'msr'
@@ -958,7 +958,7 @@ function updateUI() {
   const imgLabel = document.getElementById('image-label');
   if (imgLabel) {
     imgLabel.textContent = usesControl
-      ? 'Reference image (optional — who or what to render)'
+      ? 'Reference image (identity — needs VACE/Animate; LTX Distilled will ignore the face)'
       : isSwap
       ? 'Face reference (whose face appears — required)'
       : isSheet
