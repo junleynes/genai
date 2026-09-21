@@ -286,9 +286,11 @@
         <option value="full">Full sheet — turnaround + expressions</option>
       </select>
       <p class="text-xs text-slate-400 mt-1">
-        Describe only the character in the prompt — layout, white background and
-        consistency wording are added automatically. Output is a wide image on a
-        plain white background, ready to use as a reference for MSR or VACE.
+        Describe the character and/or upload a photo of them. Layout, white
+        background and consistency wording are added automatically. Output is a
+        wide sheet on a plain white background, ready for MSR or VACE.
+        <strong class="font-medium text-slate-500 dark:text-slate-300">A reference photo needs an identity/edit model</strong>
+        (Krea Identity, Qwen Image Edit, etc.) — plain Flux / Klein will invent a different person.
       </p>
     </div>
 
@@ -572,7 +574,7 @@ function isVideoOut() { return ['t2v','i2v','ia2v','v2v','p2v','fs','msr'].inclu
 function needsImage() { return ['i2v','i2i','ia2v'].includes(currentType) || ['v2v','fs'].includes(currentType); }
 function needsAudio() { return currentType === 'ia2v'; }
 function needsVideo() { return currentType === 'v2v' || currentType === 'fs'; }
-function promptRequired() { return ['t2v','t2i','cs','msr'].includes(currentType); }
+function promptRequired() { return ['t2v','t2i','msr'].includes(currentType); }
 function isFaceSwap() { return currentType === 'fs'; }
 
 
@@ -960,7 +962,7 @@ function updateUI() {
       : isSwap
       ? 'Face reference (whose face appears — required)'
       : isSheet
-      ? 'Reference photo (optional — base the sheet on this person)'
+      ? 'Reference photo (use an identity/edit model — plain Flux will not match the face)'
       : 'Image';
   }
   document.getElementById('image-req')?.classList.toggle('hidden', usesControl || isSheet);
@@ -975,7 +977,7 @@ function updateUI() {
   const pEl = document.getElementById('prompt');
   if (pEl) {
     pEl.placeholder = isSheet
-      ? 'Describe the character — age, build, hair, clothing, distinguishing features…'
+      ? 'Optional if you uploaded a photo — otherwise describe age, build, hair, clothing…'
       : currentType === 'msr'
       ? 'Describe the scene — name each reference in order: “Image 1 is the background, Image 2 is the presenter…”'
       : isSwap

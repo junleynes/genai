@@ -394,10 +394,19 @@ _CS_SUFFIX = (
     "full character visible and not cropped, character sheet layout"
 )
 
+# Extra constraints when the sheet must match a real reference photo.
+_CS_PHOTO_SUFFIX = (
+    "photorealistic, true-to-life skin texture and facial features, "
+    "accurate likeness of the reference person, natural proportions, "
+    "same age ethnicity and distinctive details as the reference photo, "
+    "not illustrated, not anime, not stylized cartoon"
+)
+
 _CS_NEGATIVE = (
     "cropped, cut off, multiple different characters, inconsistent design, "
     "changing outfit, changing hairstyle, busy background, scenery, text, "
-    "labels, watermark, signature, harsh shadows, motion blur"
+    "labels, watermark, signature, harsh shadows, motion blur, "
+    "cartoon, anime, illustration, painting, deformed face, wrong person"
 )
 
 
@@ -411,18 +420,31 @@ def _build_character_sheet_prompt(prompt: str, params: dict) -> tuple[str, str]:
     """
     layout_key = (params.get("sheet_layout") or "turnaround").lower()
     layout = CHARACTER_SHEET_LAYOUTS.get(layout_key, CHARACTER_SHEET_LAYOUTS["turnaround"])
-    subject = (prompt or "").strip() or "an original character"
+    has_ref = bool(
+        params.get("image_url")
+        or params.get("image_path")
+        or params.get("reference_image_paths")
+    )
+    subject = (prompt or "").strip()
+    if not subject:
+        subject = (
+            "the exact person shown in the reference photograph"
+            if has_ref
+            else "an original character"
+        )
     # When the user supplied a photo, the sheet is about *that* person — say
     # so explicitly or the model may treat the sheet as a generic character
     # and quietly ignore who the reference was.
     ref_hint = ""
-    if params.get("image_url") or params.get("image_path") or params.get("reference_image_paths"):
+    photo_extra = ""
+    if has_ref:
         ref_hint = (
             "Base the sheet exactly on the person in the reference image, "
             "preserving their face, hairstyle, body proportions, clothing and "
-            "distinctive features. "
+            "distinctive features. Do not invent a different person. "
         )
-    full = f"{layout}. {ref_hint}Character: {subject}. {_CS_SUFFIX}"
+        photo_extra = f" {_CS_PHOTO_SUFFIX}."
+    full = f"{layout}. {ref_hint}Character: {subject}. {_CS_SUFFIX}.{photo_extra}"
 
     negative = (params.get("negative_prompt") or "").strip()
     negative = f"{negative}, {_CS_NEGATIVE}" if negative else _CS_NEGATIVE
@@ -642,13 +664,15 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
         # practice) — an explicit choice is theirs to keep.
         if not params.get("resolution") or params.get("resolution") == "832x480":
             settings["resolution"] = "1920x1080"
-        # An input photo defines who the character is, so it is a reference
-        # rather than a starting canvas to be redrawn.
-        if image_path and _supports_reference_images(str(settings.get("model_type") or "")):
+        # An input photo defines *who* the character is. Always attach it as
+        # image_refs so identity models can consume it. Plain Flux / t2i
+        # models do not read image_refs — _prepare_mcp_source will either
+        # switch to an identity/edit model (Auto) or fail loudly (explicit
+        # pick). Never use image_start here: that path is img2img redraw and
+        # produces a sheet that only vaguely resembles the photo.
+        if image_path:
             settings["image_refs"] = [str(image_path)]
             settings.pop("image_start", None)
-        elif image_path:
-            settings["image_start"] = str(image_path)
 
     quality = (params.get("quality") or "balanced").lower()
     if quality == "fast":
@@ -1260,43 +1284,48 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 )
 
     # ── Character-sheet reference photo ──────────────────────────────────
-    # For cs, an input photo says "this is the character", so the sheet should
-    # be a true identity reference, not a redrawn starting canvas. Auto
-    # resolves to the plain image default (e.g. flux_dev) which accepts
-    # image_start and visibly ignores the "who" — upgrade it to an
-    # edit/identity-capable image model when one exists rather than silently
-    # shipping a sheet of the wrong person.
-    if jtype == "cs" and source.get("image_start"):
+    # For cs, an input photo says "this is the character", so the sheet must
+    # run on an identity/edit model that actually reads image_refs. Plain
+    # Flux / Klein / generic t2i accept the job and ignore the face — that
+    # looks like "the sheet doesn't resemble the reference". Auto upgrades;
+    # an explicit non-capable pick fails with a clear error.
+    if jtype == "cs" and (source.get("image_refs") or source.get("image_start")):
         params = job.get("params") or {}
         requested = params.get("model_type") or params.get("model")
         explicit = bool(requested) and requested not in ("auto", "")
         current = str(source.get("model_type") or "")
 
-        if explicit and not _supports_reference_images(current):
-            raise RuntimeError(
-                f"Model '{current}' cannot use a reference photo as an identity "
-                "reference for a character sheet — pick an edit/identity-capable "
-                "image model, or set Model to Auto."
-            )
-        if not explicit and not _supports_reference_images(current):
+        # Normalize: identity always travels as image_refs for cs.
+        if source.get("image_start") and not source.get("image_refs"):
+            source["image_refs"] = [source["image_start"]]
+            source.pop("image_start", None)
+            source.pop("image_prompt_type", None)
+
+        if not _supports_reference_images(current):
             picked = _pick_reference_model(
-                mcp_url, "cs", None, CS_MODEL_PREFERENCE
+                mcp_url, "cs", requested if explicit else None, CS_MODEL_PREFERENCE
             )
+            if explicit:
+                hint = f" (e.g. '{picked}')" if picked else ""
+                raise RuntimeError(
+                    f"Model '{current}' cannot preserve a reference photo on a "
+                    "character sheet — it is a text-to-image model and will invent "
+                    "a different person. Pick an identity/edit-capable image "
+                    f"model{hint}, or set Model to Auto."
+                )
             if picked and picked != current:
                 source["model_type"] = picked
-                source["image_refs"] = [source["image_start"]]
-                source.pop("image_start", None)
-                source.pop("image_prompt_type", None)
                 logger.info(
                     "Job %s: '%s' can't use the reference photo as a character-sheet "
                     "identity reference; switched to '%s'",
                     job.get("id"), current, picked,
                 )
             else:
-                logger.warning(
-                    "Job %s: no reference-capable image model available, so the "
-                    "reference photo is used as a starting canvas only",
-                    job.get("id"),
+                raise RuntimeError(
+                    "No identity/edit-capable image model is available on this "
+                    "WanGP install, so a reference photo cannot drive a character "
+                    "sheet. Install a Krea Identity, Qwen Image Edit, or similar "
+                    "model, or generate the sheet from a text description only."
                 )
 
     # Reference images only do something on models that consume them. Sending
@@ -2721,6 +2750,12 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
                     s += 2
                 if "i2i" in blob or "img2img" in blob or "edit" in blob:
                     s += 1
+            # Character sheets with a photo need identity/edit models. Rank
+            # those first so Auto and the dropdown surface them over plain Flux.
+            if job_type == "cs" and _supports_reference_images(
+                m.get("model_type", ""), m.get("name", ""), m.get("family", "")
+            ):
+                s += 5
         elif job_type == "p2v":
             if "video" in mo:
                 s += 3

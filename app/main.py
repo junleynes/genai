@@ -909,7 +909,15 @@ async def create_job(
     prompt_clean = (prompt or "").strip()
     if not prompt_clean and job_type in ("t2v", "t2i", "cs", "msr"):
         if job_type == "cs":
-            raise HTTPException(400, "Describe the character")
+            has_cs_image = bool(
+                (image is not None and getattr(image, "filename", None))
+                or (image_library_id or "").strip()
+            )
+            if not has_cs_image:
+                raise HTTPException(
+                    400,
+                    "Describe the character, or upload a reference photo of them.",
+                )
         if job_type == "msr":
             raise HTTPException(400, "Describe the scene — name each reference (e.g. \"Image 1 is the background, Image 2 is the presenter…\")")
         raise HTTPException(400, "Prompt is required for text-based generation")
