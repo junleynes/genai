@@ -219,6 +219,20 @@
             <option value="per_user" {% if settings.concurrent_scope == 'per_user' %}selected{% endif %}>Per user</option>
           </select>
         </div>
+        <div>
+          <label class="block text-sm font-medium mb-1.5">Job timeout (seconds)</label>
+          <input type="number" id="mcp_timeout_s" min="60" max="86400" step="60"
+            value="{{ settings.mcp_timeout_s if settings.mcp_timeout_s is defined else 3600 }}"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+          <p class="text-xs text-slate-400 mt-1">Mark a generation failed if MCP has not finished by then (default 3600).</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1.5">Stale job threshold (minutes)</label>
+          <input type="number" id="stale_job_minutes" min="1" max="1440"
+            value="{{ settings.stale_job_minutes if settings.stale_job_minutes is defined else 30 }}"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+          <p class="text-xs text-slate-400 mt-1">Processing jobs with no update longer than this are re-queued on recovery.</p>
+        </div>
       </div>
     </div>
 
@@ -231,9 +245,41 @@
     <div class="flex flex-wrap gap-3">
       <button type="submit" class="btn-brand px-5 py-2.5 rounded-xl font-semibold">Save</button>
       <button type="button" id="test-btn" class="px-5 py-2.5 rounded-xl font-semibold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">Test connection</button>
+      <button type="button" id="diagnose-btn" class="px-5 py-2.5 rounded-xl font-semibold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">Run diagnostics</button>
+      <button type="button" id="recover-btn" class="px-5 py-2.5 rounded-xl font-semibold border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30">Recover stale jobs</button>
     </div>
     <div id="test-result" class="hidden text-sm p-3 rounded-xl"></div>
+    <pre id="diagnose-result" class="hidden text-xs p-3 rounded-xl bg-slate-900 text-slate-100 overflow-x-auto max-h-96 whitespace-pre-wrap"></pre>
   </form>
+
+  <!-- Health panel -->
+  <div class="mt-8 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60">
+    <div class="flex items-center justify-between gap-3 mb-4">
+      <div>
+        <h2 class="text-lg font-semibold">Health</h2>
+        <p class="text-xs text-slate-500 dark:text-slate-400">Queue depth and reachability of MCP / outputs / inputs.</p>
+      </div>
+      <button type="button" id="health-refresh" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">Refresh</button>
+    </div>
+    <div id="health-panel" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+      <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+        <p class="text-xs text-slate-500 mb-1">Queue</p>
+        <p id="h-queue" class="font-medium">—</p>
+      </div>
+      <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+        <p class="text-xs text-slate-500 mb-1">MCP</p>
+        <p id="h-mcp" class="font-medium">—</p>
+      </div>
+      <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+        <p class="text-xs text-slate-500 mb-1">Outputs HTTP</p>
+        <p id="h-out" class="font-medium">—</p>
+      </div>
+      <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+        <p class="text-xs text-slate-500 mb-1">Inputs HTTP</p>
+        <p id="h-in" class="font-medium">—</p>
+      </div>
+    </div>
+  </div>
 
   <div class="mt-8 p-5 rounded-2xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 text-sm text-slate-600 dark:text-slate-400">
     <p class="font-medium text-slate-800 dark:text-slate-200 mb-2">Official API (API.md)</p>
@@ -284,6 +330,8 @@ function payload() {
     wan2gp_input_http_base: document.getElementById('wan2gp_input_http_base').value.trim(),
     wan2gp_input_http_token: document.getElementById('wan2gp_input_http_token').value.trim(),
     wan2gp_control_letters: document.getElementById('wan2gp_control_letters').value.trim(),
+    mcp_timeout_s: parseInt(document.getElementById('mcp_timeout_s').value, 10) || 3600,
+    stale_job_minutes: parseInt(document.getElementById('stale_job_minutes').value, 10) || 30,
   };
 }
 
@@ -385,6 +433,53 @@ async function loadAdminModels() {
 
 document.getElementById('reload-models')?.addEventListener('click', loadAdminModels);
 loadAdminModels();
+
+
+
+async function refreshHealth() {
+  const q = document.getElementById('h-queue');
+  const m = document.getElementById('h-mcp');
+  const o = document.getElementById('h-out');
+  const i = document.getElementById('h-in');
+  [q,m,o,i].forEach(el => { if (el) el.textContent = '…'; });
+  try {
+    const h = await API.get('/api/admin/health');
+    const qs = h.queue || {};
+    q.textContent = `queued ${qs.queued||0} · processing ${qs.processing||0} · failed ${qs.failed||0}`;
+    m.textContent = (h.mcp?.ok ? '✓ ' : '✗ ') + (h.mcp?.message || '') +
+      (h.mcp?.latency_ms != null ? ` (${h.mcp.latency_ms}ms)` : '');
+    m.className = 'font-medium ' + (h.mcp?.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400');
+    o.textContent = (h.outputs_http?.ok ? '✓ ' : '✗ ') + (h.outputs_http?.message || '');
+    i.textContent = (h.inputs_http?.ok ? '✓ ' : '✗ ') + (h.inputs_http?.message || '');
+  } catch (err) {
+    if (q) q.textContent = 'Error: ' + err.message;
+  }
+}
+document.getElementById('health-refresh')?.addEventListener('click', refreshHealth);
+refreshHealth();
+
+document.getElementById('diagnose-btn')?.addEventListener('click', async () => {
+  const el = document.getElementById('diagnose-result');
+  el.classList.remove('hidden');
+  el.textContent = 'Running diagnostics…';
+  try {
+    const r = await API.post('/api/admin/diagnose', {});
+    el.textContent = r.report || JSON.stringify(r, null, 2);
+  } catch (err) {
+    el.textContent = '✗ ' + err.message;
+  }
+});
+
+document.getElementById('recover-btn')?.addEventListener('click', async () => {
+  if (!confirm('Re-queue stale processing jobs and start the queue?')) return;
+  try {
+    const r = await API.post('/api/admin/queue/recover', {});
+    toast(`Re-queued ${r.requeued||0}, started ${ (r.started||[]).length }`, 'success');
+    refreshHealth();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+});
 
 </script>
 {% endblock %}

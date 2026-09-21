@@ -105,6 +105,10 @@ DEFAULT_SETTINGS = {
     "queue_enabled": True,
     "max_concurrent_jobs": 1,
     "concurrent_scope": "overall",  # overall | per_user
+    # How long a generation may run before we mark it failed (seconds)
+    "mcp_timeout_s": 3600,
+    # On startup, processing jobs with no update for this many minutes are re-queued
+    "stale_job_minutes": 30,
 }
 
 
@@ -296,6 +300,72 @@ def list_queued_jobs(limit: int = 50) -> list:
         q = [j for j in jobs if j.get("status") == "queued"]
         q.sort(key=lambda x: x.get("created_at") or "")
         return q[:limit]
+
+
+
+def recover_stale_jobs(stale_minutes: int | None = None) -> dict:
+    """
+    Jobs left in 'processing' after a process restart cannot finish — re-queue them.
+    Also re-queue anything that has been processing longer than stale_minutes
+    without an update (orphaned worker).
+    Returns counts: {"requeued": n, "ids": [...]}.
+    """
+    from datetime import datetime, timezone, timedelta
+    s = get_settings()
+    mins = stale_minutes if stale_minutes is not None else int(s.get("stale_job_minutes") or 30)
+    if mins < 1:
+        mins = 1
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=mins)
+    requeued = []
+    with _lock:
+        jobs = _load(JOBS_FILE, [])
+        changed = False
+        for j in jobs:
+            if j.get("status") != "processing":
+                continue
+            # Always recover on explicit startup call (stale_minutes=0 means all processing)
+            if stale_minutes == 0:
+                stale = True
+            else:
+                ts = j.get("updated_at") or j.get("created_at") or ""
+                try:
+                    # support both Z and +00:00
+                    ts_n = ts.replace("Z", "+00:00") if ts.endswith("Z") else ts
+                    updated = datetime.fromisoformat(ts_n)
+                    if updated.tzinfo is None:
+                        updated = updated.replace(tzinfo=timezone.utc)
+                    stale = updated < cutoff
+                except Exception:
+                    stale = True  # unparseable → treat as stale
+            if not stale:
+                continue
+            j["status"] = "queued"
+            j["progress"] = 0
+            j["error"] = "Re-queued after server restart / stale processing state"
+            j["updated_at"] = _now()
+            requeued.append(j["id"])
+            changed = True
+        if changed:
+            _save(JOBS_FILE, jobs)
+    return {"requeued": len(requeued), "ids": requeued}
+
+
+def queue_stats() -> dict:
+    """Counts for admin health panel."""
+    with _lock:
+        jobs = _load(JOBS_FILE, [])
+    by = {"queued": 0, "processing": 0, "completed": 0, "failed": 0, "cancelled": 0}
+    for j in jobs:
+        st = (j.get("status") or "").lower()
+        if st in ("canceled",):
+            st = "cancelled"
+        if st in by:
+            by[st] += 1
+        else:
+            by.setdefault("other", 0)
+            by["other"] += 1
+    by["total"] = len(jobs)
+    return by
 
 
 def can_start_job(user_id: str, settings: Optional[dict] = None) -> tuple:

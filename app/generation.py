@@ -2556,8 +2556,12 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
 
         time.sleep(2.0)
 
+    msg = "MCP job timed out" + (f" (last: {last_err})" if last_err else "")
+    logger.warning("job.timeout id=%s %s", job_id, msg)
     db.update_job(job_id, {
-        "error": f"MCP job timed out" + (f" (last: {last_err})" if last_err else "")
+        "status": "failed",
+        "progress": 0,
+        "error": msg[:800],
     })
     return False
 
@@ -2928,6 +2932,8 @@ async def process_job(job_id: str) -> None:
     if not job:
         return
 
+    jtype = job.get("job_type") or "?"
+    logger.info("job.start id=%s type=%s user=%s", job_id, jtype, job.get("user_id"))
     db.update_job(job_id, {"status": "processing", "progress": 5, "error": None, "backend": BACKEND_ID})
     settings_cfg = db.get_settings()
     mcp_url = (settings_cfg.get("wan2gp_mcp_url") or "").strip()
@@ -2962,10 +2968,19 @@ async def process_job(job_id: str) -> None:
         logger.exception("Job %s failed", job_id)
         db.update_job(job_id, {"status": "failed", "progress": 0, "error": str(e)[:800]})
     finally:
+        cur = db.get_job(job_id) or {}
+        logger.info(
+            "job.finish id=%s type=%s status=%s progress=%s",
+            job_id,
+            cur.get("job_type") or jtype,
+            cur.get("status"),
+            cur.get("progress"),
+        )
         # Kick queue after this job leaves processing
         try:
             next_ids = try_start_queued_jobs()
             if next_ids and _on_job_finished:
+                logger.info("queue.kick started=%s", next_ids)
                 _on_job_finished(next_ids)
         except Exception:
             logger.exception("queue kick failed")

@@ -1059,6 +1059,34 @@ function showTypePicker() {
 
 document.getElementById('change-type')?.addEventListener('click', showTypePicker);
 
+
+// Prefer the user's own library result as the type-card art when available.
+(async function applyShowcaseArt() {
+  if (!isLoggedIn()) return;
+  try {
+    const data = await API.get('/api/library/showcase');
+    if (!data || typeof data !== 'object') return;
+    document.querySelectorAll('.type-card').forEach(card => {
+      const t = card.dataset.type;
+      const entry = data[t];
+      if (!entry || !entry.url) return;
+      const img = card.querySelector('.type-art');
+      if (!img) return;
+      // Only swap in still images; video URLs make poor <img> sources.
+      const mt = (entry.media_type || '').toLowerCase();
+      const url = entry.url;
+      const isVid = mt === 'video' || /\.(mp4|webm|mov)(\?|$)/i.test(url);
+      if (isVid) return;
+      img.dataset.defaultSrc = img.getAttribute('src');
+      img.setAttribute('src', url);
+      img.setAttribute('title', entry.title || entry.prompt || '');
+    });
+  } catch (e) {
+    /* showcase is optional polish — ignore auth/network errors */
+  }
+})();
+
+
 document.getElementById('mode-easy').addEventListener('click', () => {
   currentMode = 'easy';
   document.getElementById('mode-easy').classList.add('active');

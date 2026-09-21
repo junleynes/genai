@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from . import auth, db
 from . import generation as gen_mod
-from .generation import process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type, list_loras_for_model, try_start_queued_jobs
+from .generation import process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type, list_loras_for_model, try_start_queued_jobs, mcp_discover_tools, mcp_ensure_session
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("genai")
@@ -46,6 +46,23 @@ async def _startup_queue_hook():
         for jid in ids:
             loop.create_task(process_job(jid))
     gen_mod._on_job_finished = _kick
+
+    # Recover jobs left in "processing" after a process restart, then start the queue.
+    try:
+        recovered = db.recover_stale_jobs(stale_minutes=0)  # all processing → queued
+        if recovered.get("requeued"):
+            logger.info(
+                "queue.recover requeued=%s ids=%s",
+                recovered["requeued"],
+                recovered.get("ids"),
+            )
+        started = try_start_queued_jobs()
+        if started:
+            logger.info("queue.startup started=%s", started)
+            _kick(started)
+    except Exception:
+        logger.exception("queue startup recovery failed")
+
     logger.info("Opensource Generative AI ready")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
@@ -145,6 +162,8 @@ class ServerConfigIn(BaseModel):
     queue_enabled: bool = True
     max_concurrent_jobs: int = 1
     concurrent_scope: str = "overall"  # overall | per_user
+    mcp_timeout_s: Optional[int] = None
+    stale_job_minutes: Optional[int] = None
     # Optional/None so a stale admin page that omits a field cannot wipe it
     # (db.update_settings skips None values).
     wan2gp_outputs_http_base: Optional[str] = None
@@ -265,6 +284,14 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "queue_enabled": bool(body.queue_enabled),
         "max_concurrent_jobs": max_c,
         "concurrent_scope": scope,
+        "mcp_timeout_s": (
+            max(60, int(body.mcp_timeout_s))
+            if body.mcp_timeout_s is not None else None
+        ),
+        "stale_job_minutes": (
+            max(1, int(body.stale_job_minutes))
+            if body.stale_job_minutes is not None else None
+        ),
         "wan2gp_outputs_http_base": (
             body.wan2gp_outputs_http_base.strip().rstrip("/")
             if body.wan2gp_outputs_http_base is not None else None
@@ -296,6 +323,182 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
 async def test_server(body: ServerConfigIn, admin: dict = Depends(auth.require_admin)):
     result = await test_wan2gp_connection(url=body.wan2gp_url or '', root=body.wan2gp_root or '', mcp_url=body.wan2gp_mcp_url or '')
     return result
+
+
+@app.get("/api/admin/health")
+async def admin_health(admin: dict = Depends(auth.require_admin)):
+    """Queue depth, MCP reachability, outputs/inputs HTTP probes."""
+    import time
+    settings = db.get_settings()
+    stats = db.queue_stats()
+    mcp_url = (settings.get("wan2gp_mcp_url") or "").strip()
+    enabled = bool(settings.get("wan2gp_enabled"))
+
+    mcp = {"ok": False, "message": "MCP URL not set", "latency_ms": None, "tools": 0}
+    if mcp_url and enabled:
+        t0 = time.time()
+        try:
+            sid = await asyncio.to_thread(mcp_ensure_session, mcp_url, 15.0)
+            tools = await asyncio.to_thread(mcp_discover_tools, mcp_url, True)
+            mcp = {
+                "ok": True,
+                "message": f"session={bool(sid)} tools={len(tools)}",
+                "latency_ms": int((time.time() - t0) * 1000),
+                "tools": len(tools),
+            }
+        except Exception as e:
+            mcp = {
+                "ok": False,
+                "message": str(e)[:400],
+                "latency_ms": int((time.time() - t0) * 1000),
+                "tools": 0,
+            }
+    elif mcp_url and not enabled:
+        mcp = {"ok": False, "message": "WanGP generation is disabled", "latency_ms": None, "tools": 0}
+
+    async def _probe(url: str, label: str) -> dict:
+        if not url:
+            return {"ok": False, "message": f"{label} not configured", "latency_ms": None}
+        t0 = time.time()
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+                r = await client.get(url if "://" in url else f"http://{url}")
+            return {
+                "ok": r.status_code < 500,
+                "message": f"HTTP {r.status_code}",
+                "latency_ms": int((time.time() - t0) * 1000),
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "message": str(e)[:300],
+                "latency_ms": int((time.time() - t0) * 1000),
+            }
+
+    outputs = await _probe(
+        (settings.get("wan2gp_outputs_http_base") or "").strip(),
+        "Outputs HTTP",
+    )
+    inputs = await _probe(
+        (settings.get("wan2gp_input_http_base") or "").strip(),
+        "Inputs HTTP",
+    )
+
+    return {
+        "ok": bool(mcp.get("ok")),
+        "queue": stats,
+        "mcp": mcp,
+        "outputs_http": outputs,
+        "inputs_http": inputs,
+        "settings": {
+            "wan2gp_enabled": enabled,
+            "queue_enabled": bool(settings.get("queue_enabled", True)),
+            "max_concurrent_jobs": int(settings.get("max_concurrent_jobs") or 1),
+            "concurrent_scope": settings.get("concurrent_scope") or "overall",
+            "mcp_timeout_s": int(settings.get("mcp_timeout_s") or 3600),
+            "stale_job_minutes": int(settings.get("stale_job_minutes") or 30),
+            "mcp_url": mcp_url or None,
+        },
+    }
+
+
+@app.post("/api/admin/diagnose")
+async def admin_diagnose(admin: dict = Depends(auth.require_admin)):
+    """Run WanGP MCP diagnostics (tools, LoRAs, p2v capability) and return text report."""
+    settings = db.get_settings()
+    mcp_url = (settings.get("wan2gp_mcp_url") or "").strip()
+    if not mcp_url:
+        return {"ok": False, "report": "No MCP URL configured in Admin → Server & Queue."}
+
+    lines: list[str] = [f"MCP URL: {mcp_url}", ""]
+    ok = True
+    try:
+        tools = await asyncio.to_thread(mcp_discover_tools, mcp_url, True)
+    except Exception as e:
+        return {
+            "ok": False,
+            "report": f"FAILED to list tools: {e}\nCheck URL ends with /mcp/ and WanGP MCP is running.",
+        }
+
+    lines.append("=" * 60)
+    lines.append("1. TOOLS")
+    lines.append("=" * 60)
+    if not tools:
+        ok = False
+        lines.append("  (none)")
+    else:
+        for t in tools:
+            from .generation import _tool_param_names
+            params = ", ".join(_tool_param_names(t)) or "-"
+            lines.append(f"  {str(t.get('name', '?')):40} params: {params}")
+        lines.append(f"\n  {len(tools)} tool(s) total")
+
+    # LoRA tool probe
+    lines.append("")
+    lines.append("=" * 60)
+    lines.append("2. LORA LISTING")
+    lines.append("=" * 60)
+    lora_tools = [
+        str(t.get("name"))
+        for t in tools
+        if "lora" in str(t.get("name") or "").lower()
+    ]
+    if not lora_tools:
+        lines.append("  No LoRA-related tool advertised.")
+    else:
+        lines.append(f"  Candidates: {', '.join(lora_tools)}")
+        try:
+            sample = await asyncio.to_thread(list_loras_for_model, mcp_url, "")
+            if isinstance(sample, tuple):
+                sample, supported = sample
+            else:
+                supported = True
+            n = len(sample) if isinstance(sample, list) else 0
+            lines.append(f"  list_loras_for_model returned {n} item(s) supported={supported}")
+        except Exception as e:
+            lines.append(f"  list_loras_for_model error: {e}")
+
+    # p2v models
+    lines.append("")
+    lines.append("=" * 60)
+    lines.append("3. P2V / CONTROL-CAPABLE MODELS")
+    lines.append("=" * 60)
+    try:
+        models = await asyncio.to_thread(list_models_for_job_type, mcp_url, "p2v")
+        lines.append(f"  {len(models)} model(s) offered for p2v")
+        for m in (models or [])[:15]:
+            if isinstance(m, dict):
+                lines.append(f"    - {m.get('id') or m.get('model_type') or m.get('name') or m}")
+            else:
+                lines.append(f"    - {m}")
+        if len(models or []) > 15:
+            lines.append(f"    … +{len(models) - 15} more")
+    except Exception as e:
+        ok = False
+        lines.append(f"  FAILED: {e}")
+
+    return {"ok": ok, "report": "\n".join(lines)}
+
+
+@app.post("/api/admin/queue/recover")
+async def admin_queue_recover(
+    background_tasks: BackgroundTasks,
+    admin: dict = Depends(auth.require_admin),
+):
+    """Manually re-queue stale processing jobs and start capacity."""
+    recovered = db.recover_stale_jobs()  # uses stale_job_minutes from settings
+    started = try_start_queued_jobs()
+    for jid in started:
+        background_tasks.add_task(process_job, jid)
+    return {
+        "ok": True,
+        "requeued": recovered.get("requeued", 0),
+        "ids": recovered.get("ids") or [],
+        "started": started,
+        "queue": db.queue_stats(),
+    }
+
 
 
 @app.post("/api/admin/upload")
