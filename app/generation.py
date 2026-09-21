@@ -68,6 +68,10 @@ def _supports_reference_images(model_type: str, name: str = "", family: str = ""
         "identity",      # Krea 2 Identity Edit (up to 2 refs)
         "edit",          # Qwen Image Edit Plus: multi-reference editing
         "recam",
+        "swap",          # face-swap / identity-transplant finetunes
+        "face",          # face-id / id-context conditioning
+        "ecc",           # ECC identity-family models
+        "exid",
     ))
 
 
@@ -152,6 +156,67 @@ def _pick_control_model(mcp_url: str, requested: str | None = None) -> Optional[
 
     best = sorted(capable, key=rank, reverse=True)[0]
     return best.get("model_type")
+
+
+def _pick_reference_model(
+    mcp_url: str,
+    job_type: str,
+    requested: str | None = None,
+    prefer: tuple[str, ...] = (),
+) -> Optional[str]:
+    """
+    Choose a reference-capable model for fs / msr / cs jobs. Like
+    _pick_control_model but driven by _supports_reference_images — those two
+    job families have different model needs than pose control (identity
+    transfer vs VACE guide conditioning), so they get their own picker.
+    Returns None when the catalogue has no reference-capable model.
+    """
+    try:
+        models = list_models_for_job_type(mcp_url, job_type, limit=200)
+    except Exception:
+        logger.exception("could not list models to resolve a reference-capable model")
+        return None
+
+    capable = [
+        m for m in models
+        if _supports_reference_images(
+            m.get("model_type", ""), m.get("name", ""), m.get("family", "")
+        )
+    ]
+    if not capable:
+        return None
+
+    # Honour an explicit request when it is genuinely capable.
+    if requested:
+        for m in capable:
+            if m.get("model_type") == requested:
+                return requested
+
+    # Rank by family preference: MSR proper for msr, identity/edit for
+    # face swap and character sheets, then any reference-capable model.
+    def rank(m: dict) -> int:
+        blob = f"{m.get('model_type','')} {m.get('name','')} {m.get('family','')}".lower()
+        for i, kw in enumerate(prefer):
+            if kw in blob:
+                return len(prefer) - i
+        return 0
+
+    best = sorted(capable, key=rank, reverse=True)[0]
+    return best.get("model_type")
+
+
+# Family preference order for reference-model auto-resolution. The higher a
+# keyword appears, the more preferred that family is for the job type.
+FS_MODEL_PREFERENCE = (
+    "identity", "exid", "ecc", "swap", "face", "id-lora",
+    "animate", "phantom", "standin", "lynx", "msr", "vace",
+)
+MSR_MODEL_PREFERENCE = (
+    "msr", "vace", "phantom", "animate", "lynx", "bernini", "identity", "edit",
+)
+CS_MODEL_PREFERENCE = (
+    "identity", "edit", "bernini", "msr", "vace", "phantom", "animate", "lynx",
+)
 
 
 def _normalize_lora_list(raw: Any) -> list[dict]:
@@ -347,7 +412,17 @@ def _build_character_sheet_prompt(prompt: str, params: dict) -> tuple[str, str]:
     layout_key = (params.get("sheet_layout") or "turnaround").lower()
     layout = CHARACTER_SHEET_LAYOUTS.get(layout_key, CHARACTER_SHEET_LAYOUTS["turnaround"])
     subject = (prompt or "").strip() or "an original character"
-    full = f"{layout}. Character: {subject}. {_CS_SUFFIX}"
+    # When the user supplied a photo, the sheet is about *that* person — say
+    # so explicitly or the model may treat the sheet as a generic character
+    # and quietly ignore who the reference was.
+    ref_hint = ""
+    if params.get("image_url") or params.get("image_path") or params.get("reference_image_paths"):
+        ref_hint = (
+            "Base the sheet exactly on the person in the reference image, "
+            "preserving their face, hairstyle, body proportions, clothing and "
+            "distinctive features. "
+        )
+    full = f"{layout}. {ref_hint}Character: {subject}. {_CS_SUFFIX}"
 
     negative = (params.get("negative_prompt") or "").strip()
     negative = f"{negative}, {_CS_NEGATIVE}" if negative else _CS_NEGATIVE
@@ -436,6 +511,20 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     if jtype == "v2v" and video_path:
         settings["video_source"] = str(video_path)
         settings["image_prompt_type"] = "V"
+    if jtype == "fs":
+        # Face Swap: the input image is the identity to transplant, the source
+        # video is what gets reshot. Identity travels through image_refs,
+        # motion through v2v continuation. The model is enforced to be
+        # reference-capable in _prepare_mcp_source. image_prompt_type is left
+        # empty so WanGP auto-fills it: source-video continuation adds "V" and
+        # reference images add "I" — pinning just "V" would stop the I flag
+        # from being added and silently drop the identity.
+        if image_path:
+            settings["image_refs"] = [str(image_path)]
+            settings.pop("image_start", None)
+        if video_path:
+            settings["video_source"] = str(video_path)
+            settings.pop("image_prompt_type", None)
     # End frame. Only i2v/v2v offer it, and WanGP only honours it when "E"
     # is present in image_prompt_type — setting image_end alone leaves the
     # end frame silently ignored, the same failure mode as an unguided pose.
@@ -502,7 +591,7 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
             "Job %s: %s-guided generation (video_prompt_type=%s, %d ref image(s))",
             job.get("id"), control_type, settings["video_prompt_type"], len(ref_paths),
         )
-    elif len(ref_paths) > 1 and jtype in ("t2v", "i2v", "t2i", "i2i"):
+    elif len(ref_paths) > 1 and jtype in ("t2v", "i2v", "t2i", "i2i", "msr"):
         # Reference-to-video with no driving video: LTX-2.3 MSR packs 2-5
         # reference images (background first, then subjects/objects) into a
         # pseudo-video sequence. VACE reference-to-video works the same way.
@@ -517,6 +606,12 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
             "Job %s: multi-reference generation with %d images",
             job.get("id"), len(ref_paths),
         )
+    elif jtype == "msr" and ref_paths:
+        # Defensive: the UI/server require 2-5, but a single reference should
+        # still travel as a reference rather than silently becoming a start frame.
+        settings["image_refs"] = ref_paths
+        settings.pop("image_start", None)
+        settings.pop("image_prompt_type", None)
 
     # ── LoRAs ─────────────────────────────────────────────────────────────
     # Applies to every job type, not just guided ones. When the user picked
@@ -542,9 +637,10 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
 
     if jtype == "cs":
         # A sheet is several views side by side, so it needs width. Only
-        # override when the user left the default portrait/square value —
-        # an explicit choice is theirs to keep.
-        if not params.get("resolution"):
+        # override when the user left the form's untouched default (the server
+        # always supplies a resolution, so a missing value never happens in
+        # practice) — an explicit choice is theirs to keep.
+        if not params.get("resolution") or params.get("resolution") == "832x480":
             settings["resolution"] = "1920x1080"
         # An input photo defines who the character is, so it is a reference
         # rather than a starting canvas to be redrawn.
@@ -1065,7 +1161,7 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         "force_fps": settings_cfg.get("default_fps") or "24",
     }
     # Per-job-type model/LoRA defaults, so Easy mode can hide both pickers.
-    for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs"):
+    for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr"):
         mv = (settings_cfg.get(f"default_model_{_jt}") or "").strip()
         if mv:
             defaults[f"model_{_jt}"] = mv
@@ -1123,6 +1219,85 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 "(default_loras_p2v) or pick one on the Generate page.",
                 job.get("id"), final_model,
             )
+
+    # ── Reference-capable model enforcement (fs / msr) ───────────────────
+    # Face swap and Multi-Subject Reference only *do* something on models that
+    # consume image_refs. "Auto" must resolve to one of them rather than the
+    # generic video default, and an explicit pick that can't honour the
+    # references should fail loudly instead of returning output that visibly
+    # ignored the reference face/targets.
+    jtype = job.get("job_type", "t2v")
+    if source.get("image_refs") and jtype in ("fs", "msr"):
+        params = job.get("params") or {}
+        requested = params.get("model_type") or params.get("model")
+        explicit = bool(requested) and requested not in ("auto", "")
+        current = str(source.get("model_type") or "")
+
+        if not _supports_reference_images(current):
+            prefer = FS_MODEL_PREFERENCE if jtype == "fs" else MSR_MODEL_PREFERENCE
+            label = "face swap" if jtype == "fs" else "multi-subject reference"
+            picked = _pick_reference_model(
+                mcp_url, jtype, requested if explicit else None, prefer
+            )
+            if picked and picked != current:
+                if explicit:
+                    raise RuntimeError(
+                        f"Model '{current}' cannot {label} — the reference "
+                        "images need an identity/MSR-style model (e.g. "
+                        f"'{picked}'). Pick one on the Generate page, or set "
+                        "Model to Auto."
+                    )
+                logger.info(
+                    "Job %s: '%s' is not reference-capable; using '%s' for %s",
+                    job.get("id"), current, picked, label,
+                )
+                source["model_type"] = picked
+            elif not picked:
+                raise RuntimeError(
+                    f"No reference-capable model is available on this WanGP "
+                    f"install for {label}. Install an identity/edit model or "
+                    "the LTX-2.3 MSR finetune and try again."
+                )
+
+    # ── Character-sheet reference photo ──────────────────────────────────
+    # For cs, an input photo says "this is the character", so the sheet should
+    # be a true identity reference, not a redrawn starting canvas. Auto
+    # resolves to the plain image default (e.g. flux_dev) which accepts
+    # image_start and visibly ignores the "who" — upgrade it to an
+    # edit/identity-capable image model when one exists rather than silently
+    # shipping a sheet of the wrong person.
+    if jtype == "cs" and source.get("image_start"):
+        params = job.get("params") or {}
+        requested = params.get("model_type") or params.get("model")
+        explicit = bool(requested) and requested not in ("auto", "")
+        current = str(source.get("model_type") or "")
+
+        if explicit and not _supports_reference_images(current):
+            raise RuntimeError(
+                f"Model '{current}' cannot use a reference photo as an identity "
+                "reference for a character sheet — pick an edit/identity-capable "
+                "image model, or set Model to Auto."
+            )
+        if not explicit and not _supports_reference_images(current):
+            picked = _pick_reference_model(
+                mcp_url, "cs", None, CS_MODEL_PREFERENCE
+            )
+            if picked and picked != current:
+                source["model_type"] = picked
+                source["image_refs"] = [source["image_start"]]
+                source.pop("image_start", None)
+                source.pop("image_prompt_type", None)
+                logger.info(
+                    "Job %s: '%s' can't use the reference photo as a character-sheet "
+                    "identity reference; switched to '%s'",
+                    job.get("id"), current, picked,
+                )
+            else:
+                logger.warning(
+                    "Job %s: no reference-capable image model available, so the "
+                    "reference photo is used as a starting canvas only",
+                    job.get("id"),
+                )
 
     # Reference images only do something on models that consume them. Sending
     # them elsewhere isn't an error, but the output silently disregards them,
@@ -2439,6 +2614,12 @@ _JOB_TYPE_FILTERS = {
     "cs": {"main_output": "image"},   # character sheet: a wide reference image
     # Pose/control-driven video needs a VACE-style model that accepts a guide
     "p2v": {"main_output": "video", "inputs": "video"},
+    # Face swap: identity reference image onto a source video. Needs an
+    # identity/reference-capable video model.
+    "fs": {"main_output": "video", "inputs": "video"},
+    # LTX-2.3 Multi-Subject Reference: 2-5 refs (background first, then
+    # subjects) → a video scene. Needs a reference-capable video model.
+    "msr": {"main_output": "video", "inputs": "image"},
 }
 
 
@@ -2546,7 +2727,7 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
                 s += 4
             if "video" in inp:
                 s += 2
-        elif job_type in ("t2v", "i2v", "ia2v", "v2v"):
+        elif job_type in ("t2v", "i2v", "ia2v", "v2v", "fs", "msr"):
             if "video" in mo:
                 s += 3
             if "image" in mo and "video" not in mo:
@@ -2559,6 +2740,16 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
                 s += 1
             if job_type == "ia2v" and ("audio" in inp or "s2v" in blob or "talk" in blob):
                 s += 2
+            if job_type == "fs" and _supports_reference_images(
+                m.get("model_type", ""), m.get("name", ""), m.get("family", "")
+            ):
+                s += 5
+            if job_type == "msr" and ("video" in inp or "msr" in blob):
+                s += 2
+            if job_type == "msr" and _supports_reference_images(
+                m.get("model_type", ""), m.get("name", ""), m.get("family", "")
+            ):
+                s += 5
         return s
 
     # Hard filter on output media: an image job must never be offered a
@@ -2613,38 +2804,104 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
                 len(matching),
             )
 
+    # fs / msr are the same kind of hard filter: a model that doesn't consume
+    # image_refs quietly ignores the reference face / subjects, and offering
+    # one in the dropdown just produces confusingly wrong output.
+    if job_type in ("fs", "msr"):
+        capable = [
+            m for m in matching
+            if _supports_reference_images(
+                m.get("model_type", ""), m.get("name", ""), m.get("family", "")
+            )
+        ]
+        if capable:
+            matching = capable
+        else:
+            logger.warning(
+                "No reference-capable models found among %d candidates for %s; "
+                "the references will be ignored by any of them",
+                len(matching), job_type,
+            )
+
     ranked = sorted(matching, key=score, reverse=True)
     positive = [m for m in ranked if score(m) > 0]
     return positive if positive else ranked
 
 
+def _list_models_paged(
+    mcp_url: str,
+    tool: str,
+    args: dict,
+    want: int = 200,
+    page_size: int = 50,
+) -> list[dict]:
+    """
+    Paginate a model-listing tool with offset/limit.
+
+    Some WanGP builds cap the page below the requested limit (e.g. return at
+    most 10 rows no matter what `limit` says), so a single limit=N call only
+    ever yields the first page. Loop with offset until the catalogue is
+    exhausted or we have enough models. Safe on servers that ignore `offset`
+    too: dedup by model_type and stop when a page adds nothing.
+    """
+    collected: list[dict] = []
+    seen = set()
+    errors: list[str] = []
+    offset = 0
+
+    while len(collected) < want:
+        page_args = dict(args)
+        page_args["limit"] = page_size
+        page_args["offset"] = offset
+        try:
+            raw = mcp_call_tool(mcp_url, tool, page_args, timeout=60.0)
+        except Exception as e:
+            errors.append(f"{tool}(offset={offset}): {e}")
+            logger.warning("list models %s failed: %s", tool, e)
+            # A partial catalogue is more useful than nothing — keep it.
+            if collected:
+                break
+            raise RuntimeError("; ".join(errors) or f"{tool} failed")
+        batch = _normalize_model_list(raw)
+        added = 0
+        for m in batch:
+            mt = m["model_type"]
+            if mt not in seen:
+                seen.add(mt)
+                collected.append(m)
+                added += 1
+        # Server caps pages below the requested size (e.g. 10 rows), so only
+        # an empty page or no-progress (offset ignored, page repeated) means
+        # we're done — advance by what this server actually returned.
+        if not batch or added == 0:
+            break
+        offset += len(batch)
+
+    return collected
+
+
 def list_models_for_job_type(mcp_url: str, job_type: str, limit: int = 120) -> list[dict]:
     """
     Load models from MCP. Tries filtered wangp_list_models, then unfiltered,
-    then wangp_list_model_defs.
+    then wangp_list_model_defs. Each listing is paginated with offset so
+    models beyond the server's page-size cap still get seen.
     """
     attempts: list[tuple[str, dict]] = []
     base_filter = dict(_JOB_TYPE_FILTERS.get(job_type) or {})
     if base_filter:
-        attempts.append(("wangp_list_models", {**base_filter, "limit": limit}))
-    attempts.append(("wangp_list_models", {"limit": limit}))
+        attempts.append(("wangp_list_models", base_filter))
+    attempts.append(("wangp_list_models", {}))
     # broader discovery
-    attempts.append(("wangp_list_model_defs", {**base_filter, "limit": limit} if base_filter else {"limit": limit}))
-    attempts.append(("wangp_list_model_defs", {"limit": limit}))
+    attempts.append(("wangp_list_model_defs", base_filter))
+    attempts.append(("wangp_list_model_defs", {}))
 
     errors = []
     collected: list[dict] = []
-    seen = set()
 
     for tool, args in attempts:
         try:
-            raw = mcp_call_tool(mcp_url, tool, args, timeout=60.0)
-            batch = _normalize_model_list(raw)
-            for m in batch:
-                mt = m["model_type"]
-                if mt not in seen:
-                    seen.add(mt)
-                    collected.append(m)
+            batch = _list_models_paged(mcp_url, tool, args, want=limit)
+            collected.extend(batch)
             if collected:
                 break
         except Exception as e:

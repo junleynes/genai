@@ -53,6 +53,24 @@
              stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
       </span>
     </button>
+    <button type="button" data-type="fs" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Face Swap → Video" aria-label="Face Swap to Video. Put someone else's face onto a source video">
+      <img class="type-art" src="/static/img/cards/v2v.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+    <button type="button" data-type="msr" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Multi-Subject Reference → Video" aria-label="Multi-Subject Reference to Video. Build a video scene from 2 to 5 reference images">
+      <img class="type-art" src="/static/img/cards/i2v.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
     <button type="button" data-type="t2i" role="radio" aria-checked="false" tabindex="0"
       class="type-card" data-label="Text → Image" aria-label="Text to Image. Generate images from text descriptions">
       <img class="type-art" src="/static/img/cards/t2i.jpg" alt="" aria-hidden="true"
@@ -215,7 +233,7 @@
         <p class="text-xs text-slate-400 mt-1">MP3, WAV, OGG — drives motion / lip-sync</p>
       </div>
       <div id="video-wrap" class="hidden">
-        <label class="block text-sm font-medium mb-1.5">Video <span class="text-red-500">*</span></label>
+        <label class="block text-sm font-medium mb-1.5"><span id="video-label">Video</span> <span class="text-red-500">*</span></label>
         <input type="file" name="video" id="video-input" accept="video/mp4,video/webm,video/quicktime"
           class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
         <p class="text-xs text-slate-400 mt-1">MP4, WEBM — source for video-to-video</p>
@@ -550,11 +568,12 @@ if (!requireAuth()) throw new Error('auth');
 let currentType = null;   // nothing chosen until a card is clicked
 let currentMode = 'easy';
 
-function isVideoOut() { return ['t2v','i2v','ia2v','v2v','p2v'].includes(currentType); }
-function needsImage() { return ['i2v','i2i','ia2v'].includes(currentType) || currentType === 'v2v'; }
+function isVideoOut() { return ['t2v','i2v','ia2v','v2v','p2v','fs','msr'].includes(currentType); }
+function needsImage() { return ['i2v','i2i','ia2v'].includes(currentType) || ['v2v','fs'].includes(currentType); }
 function needsAudio() { return currentType === 'ia2v'; }
-function needsVideo() { return currentType === 'v2v'; }
-function promptRequired() { return ['t2v','t2i','cs'].includes(currentType); }
+function needsVideo() { return currentType === 'v2v' || currentType === 'fs'; }
+function promptRequired() { return ['t2v','t2i','cs','msr'].includes(currentType); }
+function isFaceSwap() { return currentType === 'fs'; }
 
 
 let allModelsCache = [];
@@ -591,6 +610,10 @@ function fillModelSelect(models) {
     const shown = list.length;
     const suffix = currentType === 'p2v'
       ? ' — VACE-style or LTX-2 models only (LTX-2 also needs a pose/depth IC LoRA)'
+      : currentType === 'fs'
+      ? ' — identity/reference-capable video models only (face swap needs them)'
+      : currentType === 'msr'
+      ? ' — MSR / VACE-style models only give multi-subject references any identity'
       : '';
     hint.textContent = (family
       ? (shown + ' of ' + total + ' model(s) in family “' + family + '” for ' + currentType)
@@ -637,7 +660,10 @@ async function loadLoras() {
 
   let data;
   try {
-    data = await API.get('/api/loras?model_type=' + encodeURIComponent(modelType));
+    // The server resolves Auto to the per-job-type default model, because
+    // WanGP's LoRA tool requires a model_type and returns nothing without one.
+    data = await API.get('/api/loras?model_type=' + encodeURIComponent(modelType)
+      + '&job_type=' + encodeURIComponent(currentType));
   } catch (e) {
     if (seq !== loraReqSeq) return;
     loraModeManual(true);
@@ -659,7 +685,9 @@ async function loadLoras() {
     picker.classList.add('hidden');
     status.textContent = modelType
       ? 'No LoRAs installed for this model.'
-      : 'Select a specific model (not Auto) to see its LoRAs.';
+      : (data.model_type
+          ? 'No LoRAs installed for the default model (' + data.model_type + ').'
+          : 'No LoRAs installed for the default model.');
     status.className = 'text-xs text-slate-400 mt-1';
     return;
   }
@@ -677,7 +705,11 @@ async function loadLoras() {
     `;
     picker.appendChild(row);
   }
-  status.textContent = data.loras.length + ' LoRA(s) available for this model. Tick to activate; number is the weight.';
+  status.textContent = data.loras.length + ' LoRA(s) '
+    + (modelType
+        ? 'available for this model. '
+        : 'available for the default model (' + data.model_type + ') — Model is Auto. ')
+    + 'Tick to activate; number is the weight.';
   status.className = 'text-xs text-slate-400 mt-1';
 }
 
@@ -775,10 +807,11 @@ function updateRefsVisibility() {
 
   let show;
   if (!chosen || chosen === 'auto') {
-    // Model is resolved server-side. p2v auto-picks a guide-capable model,
-    // which also takes references; other types resolve to plain checkpoints
-    // that generally don't, so don't offer refs on a guess.
-    show = currentType === 'p2v';
+    // Model is resolved server-side. p2v auto-picks a guide-capable model and
+    // msr auto-picks an MSR/VACE-style model, both of which read references;
+    // other types resolve to plain checkpoints that generally don't, so don't
+    // offer refs on a guess.
+    show = currentType === 'p2v' || currentType === 'msr';
   } else {
     show = modelSupportsRefs(chosen);
   }
@@ -919,10 +952,13 @@ function updateUI() {
   media.classList.toggle('hidden', !showMedia);
 
   // For pose jobs the image is an optional identity reference, not a start frame
+  const isSwap = isFaceSwap();
   const imgLabel = document.getElementById('image-label');
   if (imgLabel) {
     imgLabel.textContent = usesControl
       ? 'Reference image (optional — who or what to render)'
+      : isSwap
+      ? 'Face reference (whose face appears — required)'
       : isSheet
       ? 'Reference photo (optional — base the sheet on this person)'
       : 'Image';
@@ -932,18 +968,26 @@ function updateUI() {
     .classList.toggle('hidden', !(needsImage() || usesControl || isSheet || currentType === 'v2v'));
   document.getElementById('audio-wrap').classList.toggle('hidden', !needsAudio());
   document.getElementById('video-wrap').classList.toggle('hidden', !needsVideo());
+  const vidLabel = document.getElementById('video-label');
+  if (vidLabel) vidLabel.textContent = isSwap ? 'Source video (whose face gets replaced — required)' : 'Video';
   document.getElementById('end-image-wrap').classList.toggle('hidden', currentType !== 'v2v' && currentType !== 'i2v');
   document.getElementById('sheet-wrap')?.classList.toggle('hidden', !isSheet);
   const pEl = document.getElementById('prompt');
-  if (pEl) pEl.placeholder = isSheet
-    ? 'Describe the character — age, build, hair, clothing, distinguishing features…'
-    : 'Describe the motion, style, or scene…';
+  if (pEl) {
+    pEl.placeholder = isSheet
+      ? 'Describe the character — age, build, hair, clothing, distinguishing features…'
+      : currentType === 'msr'
+      ? 'Describe the scene — name each reference in order: “Image 1 is the background, Image 2 is the presenter…”'
+      : isSwap
+      ? 'Describe the scene and motion (optional — the source video drives it)'
+      : 'Describe the motion, style, or scene…';
+  }
   updateRefsVisibility();
 
   document.getElementById('prompt-req').classList.toggle('hidden', !promptRequired());
   document.getElementById('prompt').required = promptRequired();
   document.getElementById('image-input').required =
-    ['i2v','i2i','ia2v'].includes(currentType)
+    ['i2v','i2i','ia2v','fs'].includes(currentType)
     && !(typeof LIBRARY_SEED !== 'undefined' && LIBRARY_SEED);
   document.getElementById('audio-input').required = needsAudio();
   document.getElementById('video-input').required = needsVideo();
@@ -1316,7 +1360,7 @@ function applyReusedJob(data) {
 
   // Input files can't be repopulated for security reasons; say so plainly
   // rather than letting someone hit Generate with a missing image.
-  const needsMedia = ['i2v', 'i2i', 'ia2v', 'v2v', 'p2v'].includes(data.job_type);
+  const needsMedia = ['i2v', 'i2i', 'ia2v', 'v2v', 'p2v', 'fs', 'msr'].includes(data.job_type);
   if (needsMedia) {
     toast('Settings restored — re-select your input media', 'success');
   } else {

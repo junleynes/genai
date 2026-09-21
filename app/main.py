@@ -83,7 +83,7 @@ class LoginIn(BaseModel):
 
 
 class JobCreateIn(BaseModel):
-    job_type: str = Field(pattern="^(t2v|i2v|t2i|i2i|ia2v|v2v|p2v|cs)$")
+    job_type: str = Field(pattern="^(t2v|i2v|t2i|i2i|ia2v|v2v|p2v|cs|fs|msr)$")
     mode: str = Field(pattern="^(easy|advanced)$")
     prompt: str = Field(default="", max_length=4000)
     title: str = ""
@@ -125,6 +125,8 @@ class ServerConfigIn(BaseModel):
     default_model_t2i: Optional[str] = None
     default_model_i2i: Optional[str] = None
     default_model_cs: Optional[str] = None
+    default_model_fs: Optional[str] = None
+    default_model_msr: Optional[str] = None
     default_loras_t2v: Optional[str] = None
     default_loras_i2v: Optional[str] = None
     default_loras_ia2v: Optional[str] = None
@@ -133,6 +135,8 @@ class ServerConfigIn(BaseModel):
     default_loras_t2i: Optional[str] = None
     default_loras_i2i: Optional[str] = None
     default_loras_cs: Optional[str] = None
+    default_loras_fs: Optional[str] = None
+    default_loras_msr: Optional[str] = None
     default_resolution: str = "1280x704"
     default_steps: int = 8
     default_guidance_scale: float = 7.5
@@ -240,14 +244,14 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
                 (getattr(body, f"default_model_{_jt}") or "").strip()
                 if getattr(body, f"default_model_{_jt}") is not None else None
             )
-            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs")
+            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr")
         },
         **{
             f"default_loras_{_jt}": (
                 (getattr(body, f"default_loras_{_jt}") or "").strip()
                 if getattr(body, f"default_loras_{_jt}") is not None else None
             )
-            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs")
+            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr")
         },
         "default_resolution": (body.default_resolution or "").strip() or "1280x704",
         "default_steps": int(body.default_steps or 8),
@@ -480,10 +484,19 @@ async def cancel_job(
 
 
 @app.get("/api/loras")
-async def api_loras(model_type: str = "", user: dict = Depends(auth.get_current_user)):
+async def api_loras(
+    model_type: str = "",
+    job_type: str = "",
+    user: dict = Depends(auth.get_current_user),
+):
     """
     LoRAs available for a given model. WanGP stores LoRAs in
     model-specific subdirectories, so the set changes with the model.
+
+    When `model_type` is empty ("Auto"), resolve it to the per-job-type
+    default model the job runner itself uses — WanGP's LoRA tool requires
+    a model_type, so querying with none yields nothing instead of the
+    default model's LoRAs.
 
     `supported` is False when this WanGP build exposes no LoRA-listing
     tool at all — the UI falls back to free-text entry in that case
@@ -500,16 +513,26 @@ async def api_loras(model_type: str = "", user: dict = Depends(auth.get_current_
             "message": "Wan2GP is not configured or is disabled.",
             "model_type": model_type,
         }
+
+    resolved = (model_type or "").strip()
+    if not resolved:
+        per_type = (
+            settings.get(f"default_model_{job_type}") or ""
+            if job_type in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr")
+            else ""
+        )
+        resolved = (per_type or "").strip() or (settings.get("default_model_type") or "").strip()
+
     try:
         loras, supported = await asyncio.to_thread(
-            list_loras_for_model, mcp_url, model_type
+            list_loras_for_model, mcp_url, resolved
         )
         return {
             "ok": True,
             "loras": loras,
             "supported": supported,
             "count": len(loras),
-            "model_type": model_type,
+            "model_type": resolved,
         }
     except Exception as e:
         logger.exception("api/loras failed")
@@ -558,7 +581,7 @@ async def create_job(
     video_library_id: str = Form(""),
     end_image_library_id: str = Form(""),
 ):
-    allowed = {"t2v", "i2v", "t2i", "i2i", "ia2v", "v2v", "p2v", "cs"}
+    allowed = {"t2v", "i2v", "t2i", "i2i", "ia2v", "v2v", "p2v", "cs", "fs", "msr"}
     if job_type not in allowed:
         raise HTTPException(400, f"Invalid job_type. Allowed: {sorted(allowed)}")
     if mode not in ("easy", "advanced"):
@@ -598,6 +621,10 @@ async def create_job(
         raise HTTPException(400, "Audio is required for Image+Audio → Video")
     if job_type == "v2v" and not video and not image and not lib_video and not lib_image:
         raise HTTPException(400, "Video or start image is required for Video → Video")
+    if job_type == "fs" and not image and not lib_image:
+        raise HTTPException(400, "A face reference image is required for Face Swap")
+    if job_type == "fs" and not video and not lib_video:
+        raise HTTPException(400, "A source video is required for Face Swap")
 
     upload_dir = BASE / "static" / "uploads" / "jobs"
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -639,6 +666,12 @@ async def create_job(
             f"Too many reference images ({len(reference_image_paths)}). "
             "Multi-subject reference supports up to 5.",
         )
+    if job_type == "msr" and len(reference_image_paths) < 2:
+        raise HTTPException(
+            400,
+            "Multi-Subject Reference needs at least 2 reference images "
+            "(background/setting first, then subjects and objects).",
+        )
 
     params = {
         "resolution": resolution,
@@ -667,12 +700,16 @@ async def create_job(
         # the broadcast preset legitimately needs more than 25.
         params["steps"] = min(params["steps"], 40)
         params["resolution"] = params.get("resolution") or "832x480"
-        if job_type in ("t2v", "i2v", "ia2v", "v2v", "p2v"):
+        if job_type in ("t2v", "i2v", "ia2v", "v2v", "p2v", "fs", "msr"):
             params["duration_seconds"] = min(float(params["duration_seconds"]), 5)
 
     prompt_clean = (prompt or "").strip()
-    if not prompt_clean and job_type in ("t2v", "t2i", "cs"):
-        raise HTTPException(400, "Describe the character" if job_type == "cs" else "Prompt is required for text-based generation")
+    if not prompt_clean and job_type in ("t2v", "t2i", "cs", "msr"):
+        if job_type == "cs":
+            raise HTTPException(400, "Describe the character")
+        if job_type == "msr":
+            raise HTTPException(400, "Describe the scene — name each reference (e.g. \"Image 1 is the background, Image 2 is the presenter…\")")
+        raise HTTPException(400, "Prompt is required for text-based generation")
 
     settings = db.get_settings()
     ok_start, reason = db.can_start_job(user["id"], settings)
