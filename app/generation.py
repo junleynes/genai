@@ -1385,7 +1385,9 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                     job.get("id"), jtype_early, keywords,
                 )
 
-    # ── Image+Audio → Video: require an audio-driven talking model ────────
+    # ── Image+Audio → Video ───────────────────────────────────────────────
+    # Preferred stack: LTX-2.3 Distilled + id-lora-celebvhq. Base model can be
+    # LTX; lipsync/identity come from the CelebV-HQ ID LoRA.
     if job.get("job_type") == "ia2v" and source.get("audio_guide"):
         params = job.get("params") or {}
         requested = params.get("model_type") or params.get("model")
@@ -1393,6 +1395,7 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         current = str(source.get("model_type") or "")
         blob = current.lower()
         audio_ok = any(k in blob for k in (
+            "ltx2", "ltx-2", "ltx_2", "ltx 2",
             "celebvhq", "celeb_v", "celebv", "multitalk", "infinitetalk",
             "infinite_talk", "fantasy", "speaking", "avatar", "s2v",
             "sound2vid", "audio2vid", "talking", "talk",
@@ -1405,6 +1408,8 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
             # Prefer celebvhq, then other talk families
             def _rank(m):
                 b = f"{m.get('model_type','')} {m.get('name','')}".lower()
+                if "ltx2" in b or "ltx-2" in b or "ltx_2" in b:
+                    return 12 if "distill" in b else 11
                 if "celebvhq" in b or "celeb_v" in b or "celebv" in b:
                     return 10
                 if "multitalk" in b or "infinitetalk" in b:
@@ -1531,8 +1536,10 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
             catalog = []
         picked = None
         for kw in (
-            "ltx-2.3-id-lora-celebvhq-3k",
-            "id-lora-celebvhq", "celebvhq-3k", "celebvhq",
+            "id-lora-celebvhq-ltx2.3",
+            "id-lora-celebvhq",
+            "ltx-2.3-id-lora-celebvhq",
+            "celebvhq-3k", "celebvhq",
         ):
             for item in catalog or []:
                 name = (
@@ -3181,8 +3188,11 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
             if job_type == "ia2v":
                 if "audio" in inp or "s2v" in blob or "talk" in blob:
                     s += 3
-                # CelebV-HQ / MultiTalk / InfiniteTalk / FantasySpeaking / Avatar
-                # are the models that actually lipsync from audio_guide.
+                # Preferred: LTX-2.3 Distilled + CelebV-HQ ID LoRA
+                if any(k in blob for k in ("ltx2", "ltx-2", "ltx_2")):
+                    s += 7
+                    if "distill" in blob:
+                        s += 2
                 if any(k in blob for k in (
                     "celebvhq", "celeb_v", "celebv", "multitalk", "infinitetalk",
                     "infinite_talk", "fantasy", "speaking", "avatar", "s2v",
@@ -3281,6 +3291,7 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
             if "audio" in inp:
                 return True
             return any(k in blob for k in (
+                "ltx2", "ltx-2", "ltx_2", "ltx 2",
                 "celebvhq", "celeb_v", "celebv", "multitalk", "infinitetalk",
                 "infinite_talk", "fantasy", "speaking", "avatar", "s2v",
                 "sound2vid", "audio2vid", "talking", "talk",

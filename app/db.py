@@ -74,7 +74,7 @@ DEFAULT_SETTINGS = {
     # video/image split cannot express.
     "default_model_t2v": "",
     "default_model_i2v": "",
-    "default_model_ia2v": "celebvhq",
+    "default_model_ia2v": "ltx2_22B_distilled_1_1",
     "default_model_v2v": "",
     "default_model_p2v": "",
     "default_model_t2i": "",
@@ -95,7 +95,7 @@ DEFAULT_SETTINGS = {
     # Prefer exact WanGP filenames; keywords also resolve (see generation).
     "default_loras_t2v": "",
     "default_loras_i2v": "",
-    "default_loras_ia2v": "ltx-2.3-id-lora-celebvhq-3k.safetensors:1.0",
+    "default_loras_ia2v": "id-lora-celebvhq-ltx2.3.safetensors:1.0",
     "default_loras_v2v": "",
     # Pose-driven: LTX Union Control IC-LoRA (pose/depth/canny)
     "default_loras_p2v": "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors:1.0",

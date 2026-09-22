@@ -615,7 +615,7 @@ const AUTO_MODELS = {
   image: '{{ settings.default_image_model_type or "flux_dev" }}',
 };
 function autoModelLabel() {
-  if (currentType === 'ia2v') return 'Auto — CelebV-HQ / talking-head';
+  if (currentType === 'ia2v') return 'Auto — LTX-2.3 Distilled + CelebV-HQ LoRA';
   if (currentType === 'fs') return 'Auto — identity model + HeadSwap LoRA';
   const m = isVideoOut() ? AUTO_MODELS.video : AUTO_MODELS.image;
   return m ? `Auto — ${m}` : 'Auto (server default)';
