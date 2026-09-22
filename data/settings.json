@@ -33,8 +33,18 @@
   "default_loras_i2v": "",
   "default_loras_ia2v": "",
   "default_loras_v2v": "",
-  "default_loras_p2v": "",
+  "default_loras_p2v": "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors:1.0",
   "default_loras_t2i": "",
   "default_loras_i2i": "",
-  "default_loras_cs": ""
+  "default_loras_cs": "",
+  "default_loras_ingredients": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors:1.0",
+  "default_loras_outpaint": "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors:1.0",
+  "default_loras_cleanplate": "ltx-2.3-22b-ic-lora-clean-plate-0.9.safetensors:1.0",
+  "default_loras_relight": "ltx-2.3-22b-ic-lora-relight-0.9.safetensors:1.0",
+  "default_loras_daynight": "ltx-2.3-22b-ic-lora-day-to-night-0.9.safetensors:1.0",
+  "default_loras_colorize": "ltx-2.3-22b-ic-lora-colorization-0.9.safetensors:1.0",
+  "default_loras_upscale": "ltx-2.3-22b-ic-lora-pixel-spatial-upscaler-x2-0.9.safetensors:1.0",
+  "default_loras_foley": "ltx-2.3-22b-lora-foley-v2a.safetensors:1.0",
+  "default_loras_fs": "",
+  "default_loras_msr": ""
 }

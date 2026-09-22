@@ -472,6 +472,52 @@ _CS_NEGATIVE = (
 )
 
 
+
+def _resolve_lora_against_catalog(
+    requested: list[str],
+    catalog: list,
+) -> list[str]:
+    """
+    Map configured LoRA names to files that actually exist on WanGP.
+
+    Accepts exact filenames, basename matches, or substring keywords
+    (e.g. "union-control" → "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors").
+    Unmatched entries are kept as-is so WanGP can still try them.
+    """
+    if not requested:
+        return []
+    names: list[str] = []
+    for item in catalog or []:
+        if isinstance(item, dict):
+            n = str(item.get("name") or item.get("path") or item.get("file") or "")
+        else:
+            n = str(item)
+        if n:
+            names.append(n)
+    if not names:
+        return list(requested)
+
+    resolved: list[str] = []
+    for req in requested:
+        req_base = req.replace("\\", "/").split("/")[-1]
+        req_low = req_base.lower()
+        hit = None
+        for n in names:
+            nb = n.replace("\\", "/").split("/")[-1]
+            if nb.lower() == req_low or n.lower() == req_low:
+                hit = n
+                break
+        if not hit:
+            # substring / keyword match (ignore extension noise)
+            key = req_low.replace(".safetensors", "").replace(".pt", "")
+            for n in names:
+                if key and key in n.lower():
+                    hit = n
+                    break
+        resolved.append(hit or req)
+    return resolved
+
+
 def _build_character_sheet_prompt(prompt: str, params: dict) -> tuple[str, str]:
     """
     Turn a plain character description into a reference-sheet prompt.
@@ -1338,6 +1384,49 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                     "(looked for %s). Install the Lightricks adapter or pick it manually.",
                     job.get("id"), jtype_early, keywords,
                 )
+
+    # Resolve configured LoRA names against the WanGP catalogue so admin
+    # defaults like "union-control" or a slightly different official filename
+    # still activate the right adapter.
+    if source.get("activated_loras"):
+        try:
+            catalog, _ = list_loras_for_model(
+                mcp_url, str(source.get("model_type") or "")
+            )
+        except Exception:
+            catalog = []
+        before = list(source["activated_loras"])
+        after = _resolve_lora_against_catalog(before, catalog)
+        if after != before:
+            logger.info(
+                "Job %s: resolved LoRAs %s → %s",
+                job.get("id"), before, after,
+            )
+            source["activated_loras"] = after
+
+    # Pose-driven without a LoRA on an LTX model: activate Union Control by keyword.
+    if (
+        job.get("job_type") == "p2v"
+        and source.get("video_guide")
+        and not source.get("activated_loras")
+        and _needs_control_lora(str(source.get("model_type") or ""))
+    ):
+        try:
+            catalog, _ = list_loras_for_model(
+                mcp_url, str(source.get("model_type") or "")
+            )
+        except Exception:
+            catalog = []
+        for kw in ("union-control", "union_control", "ic-lora-pose", "pose-control"):
+            matched = _resolve_lora_against_catalog([kw], catalog)
+            if matched and matched[0] != kw:
+                source["activated_loras"] = [matched[0]]
+                source["loras_multipliers"] = ["1.0"]
+                logger.info(
+                    "Job %s: p2v auto-activated control LoRA '%s'",
+                    job.get("id"), matched[0],
+                )
+                break
 
     # ── Guide-capable model enforcement ───────────────────────────────────
     # A guide video only does anything on a VACE-style model. "Auto" used to

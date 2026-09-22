@@ -129,16 +129,21 @@
       <p class="text-xs text-slate-400 mt-2 mb-3">
         Easy mode hides the model and LoRA pickers entirely, so these decide what it runs.
         Leave a row blank to fall back to the video/image defaults above. LoRAs use
-        <code>filename:weight, filename2:weight2</code> and must exist in WanGP's Loras folder
-        for that model. Pose-driven (p2v) additionally requires a VACE-style model — if the
-        model set here can't follow a guide, genai will substitute one that can.
+        <code>filename:weight, filename2:weight2</code>. Exact filenames or keywords
+        (e.g. <code>union-control</code>) both work — genai resolves them against WanGP's
+        LoRA list. Pose-driven needs a control LoRA on LTX (Union Control) or a VACE model.
+        Creative Lab rows ship with Lightricks IC-LoRA defaults; install the adapters on WanGP.
       </p>
       <div class="space-y-3">
         {% for jt, label in [
           ('t2v','Text → Video'), ('i2v','Image → Video'), ('ia2v','Image+Audio → Video'),
           ('v2v','Video → Video'), ('p2v','Pose-driven → Video'),
           ('t2i','Text → Image'), ('i2i','Image → Image'), ('cs','Character Sheet'),
-          ('fs','Face Swap → Video'), ('msr','Multi-Subject Ref → Video')
+          ('fs','Face Swap → Video'), ('msr','Multi-Subject Ref → Video'),
+          ('ingredients','Ingredients'), ('outpaint','In/Outpaint'),
+          ('cleanplate','Clean Plate'), ('relight','Relight'),
+          ('daynight','Day → Night'), ('colorize','Colorize'),
+          ('upscale','Upscale'), ('foley','Foley')
         ] %}
         <div class="grid grid-cols-[7rem_1fr_1fr] gap-2 items-center">
           <span class="text-xs font-mono text-slate-500">{{ label }}</span>
