@@ -113,6 +113,23 @@ def _needs_control_lora(model_type: str, name: str = "", family: str = "") -> bo
     into the checkpoint, so a guided LTX-2 job with no LoRA activated will
     generate but ignore the guide. Used to warn rather than to block.
     """
+    return _is_ltx2_family(model_type, name, family)
+
+
+def _is_ltx2_family(model_type: str, name: str = "", family: str = "") -> bool:
+    """
+    Any LTX-2 checkpoint (Distilled, MSR finetune, or otherwise), regardless
+    of variant. WanGP restores LTX-2.3's LoRA-based workflows — control
+    (pose/depth/canny via Union Control) and reference/identity (head-swap,
+    Creative Lab IC-LoRAs) alike — as adapters layered on the same base
+    checkpoints. So for LTX-2, "does this model support X" is usually a LoRA
+    question, not a checkpoint question, unlike VACE/Animate/identity
+    families where capability lives in the checkpoint itself. Deployments
+    that only install LTX-2 models + LoRAs (no VACE/Animate/identity
+    checkpoints) rely on this: see its use in the fs (face/head/body swap)
+    enforcement below, which keeps such jobs on LTX-2 instead of demanding a
+    model family that was never installed.
+    """
     blob = f"{model_type} {name} {family}".lower()
     return any(k in blob for k in ("ltx2", "ltx-2", "ltx_2"))
 
@@ -1521,9 +1538,14 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                     raise RuntimeError(
                         "A reference image was supplied for pose-driven generation, "
                         "but this WanGP install has no model that does both pose "
-                        "control and identity references (need VACE, VACE Lynx, "
-                        "or Wan Animate). Without one, only the dance motion is "
-                        "kept and the person/background from the photo are lost."
+                        "control and identity references in one job (needs VACE, "
+                        "VACE Lynx, or Wan Animate — not installed here). On an "
+                        "LTX-2-only install, get the same result in two steps "
+                        "instead: swap identity first with Face Swap (fs), then "
+                        "run Pose-driven (p2v) on that result to follow the "
+                        "driving video — LTX-2's Union Control LoRA does pose "
+                        "alone reliably, it just can't take a reference image in "
+                        "the same pass."
                     )
 
     # ── Reference-capable model enforcement (fs / msr) ───────────────────
@@ -1536,6 +1558,13 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
     # identity/face/swap model does a HEAD swap (needs the HeadSwap LoRA
     # below); an Animate/VACE-family model does a full BODY swap natively
     # (no LoRA — see the fs LoRA block further down).
+    #
+    # LTX-2-only installs (no VACE/Animate/identity checkpoints): fs stays on
+    # whichever LTX-2 checkpoint it already has — the HeadSwap IC-LoRA below
+    # is what actually does the swap, exactly like Union Control does pose
+    # for p2v. There is no evidence an LTX-2 LoRA does MSR's multi-reference
+    # packing, so msr keeps requiring a genuinely reference-capable model
+    # (its own finetune) rather than silently staying on plain LTX-2.
     jtype = job.get("job_type", "t2v")
     if source.get("image_refs") and jtype in ("fs", "msr"):
         params = job.get("params") or {}
@@ -1543,7 +1572,9 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         explicit = bool(requested) and requested not in ("auto", "")
         current = str(source.get("model_type") or "")
 
-        if not _supports_reference_images(current):
+        if jtype == "fs" and _is_ltx2_family(current):
+            pass  # HeadSwap LoRA block (below) delivers the swap on LTX-2.
+        elif not _supports_reference_images(current):
             prefer = FS_MODEL_PREFERENCE if jtype == "fs" else MSR_MODEL_PREFERENCE
             label = "face swap" if jtype == "fs" else "multi-subject reference"
             picked = _pick_reference_model(
@@ -1617,7 +1648,13 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
     # Reference images only do something on models that consume them. Sending
     # them elsewhere isn't an error, but the output silently disregards them,
     # so say so rather than letting it look like the references "didn't work".
-    if source.get("image_refs"):
+    # Skipped for fs on LTX-2: that combination is expected (the HeadSwap
+    # LoRA block below is what actually uses the reference, and it logs its
+    # own precise outcome — a second, generic "will be ignored" warning here
+    # would just be noise or, worse, wrong if the LoRA activates fine).
+    if source.get("image_refs") and not (
+        job.get("job_type") == "fs" and _is_ltx2_family(str(source.get("model_type") or ""))
+    ):
         rm = str(source.get("model_type") or "")
         if not _supports_reference_images(rm):
             logger.warning(
