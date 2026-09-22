@@ -132,7 +132,7 @@ class ServerConfigIn(BaseModel):
     wan2gp_mcp_url: str = ""
     wan2gp_enabled: bool = False
     wan2gp_cli_args: str = "--attention sdpa --profile 4"
-    default_model_type: str = "ltx2_22B_distilled"
+    default_model_type: str = "ltx2_22B_distilled_1_1"
     default_image_model_type: str = "flux_dev"
     default_model_t2v: Optional[str] = None
     default_model_i2v: Optional[str] = None
@@ -272,7 +272,7 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
         "wan2gp_mcp_url": (body.wan2gp_mcp_url or "").strip(),
         "wan2gp_enabled": body.wan2gp_enabled,
         "wan2gp_cli_args": (body.wan2gp_cli_args or "").strip(),
-        "default_model_type": (body.default_model_type or "").strip() or "ltx2_22B_distilled",
+        "default_model_type": (body.default_model_type or "").strip() or "ltx2_22B_distilled_1_1",
         "default_image_model_type": (body.default_image_model_type or "").strip() or "flux_dev",
         **{
             f"default_model_{_jt}": (

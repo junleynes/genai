@@ -611,7 +611,7 @@
 // Server-side "Auto" targets, so the dropdown can name the model it will use
 // instead of leaving it opaque.
 const AUTO_MODELS = {
-  video: '{{ settings.default_model_type or "ltx2_22B_distilled" }}',
+  video: '{{ settings.default_model_type or "ltx2_22B_distilled_1_1" }}',
   image: '{{ settings.default_image_model_type or "flux_dev" }}',
 };
 function autoModelLabel() {

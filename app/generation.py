@@ -584,7 +584,7 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
                     or "flux_dev"
                 )
             else:
-                model = defaults.get("model_type") or "ltx2_22B_distilled"
+                model = defaults.get("model_type") or "ltx2_22B_distilled_1_1"
             logger.info("Job %s: auto model -> %s (%s)", job.get("id"), model, jtype)
 
     resolution = params.get("resolution") or defaults.get("resolution") or "1280x704"
@@ -1298,7 +1298,7 @@ def _resolve_local_media(p: str | None) -> Optional[str]:
 
 def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
     defaults = {
-        "model_type": settings_cfg.get("default_model_type") or "ltx2_22B_distilled",
+        "model_type": settings_cfg.get("default_model_type") or "ltx2_22B_distilled_1_1",
         "image_model_type": settings_cfg.get("default_image_model_type") or "flux_dev",
         "resolution": settings_cfg.get("default_resolution") or "1280x704",
         "num_inference_steps": settings_cfg.get("default_steps") or 8,

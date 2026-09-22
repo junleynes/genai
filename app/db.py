@@ -65,30 +65,31 @@ DEFAULT_SETTINGS = {
     "wan2gp_cli_args": "--attention sdpa --profile 4",
     # Auto-model defaults. Kept separate per output medium: a single default
     # meant an image job resolved to a video model and vice versa.
-    "default_model_type": "ltx2_22B_distilled",        # video jobs
+    "default_model_type": "ltx2_22B_distilled_1_1",    # video jobs
     "default_image_model_type": "flux_dev",            # image jobs (t2i / i2i)
     # Per-job-type overrides. Blank falls back to the medium defaults above.
     # These exist so Easy mode can resolve a correct model with no user
     # input: job types have genuinely different needs (p2v must be VACE,
     # ia2v must be audio-capable, i2i must be edit-capable) that a single
     # video/image split cannot express.
-    "default_model_t2v": "",
-    "default_model_i2v": "",
+    # Every video-output card defaults to LTX-2.3 22B Distilled 1.1.
+    "default_model_t2v": "ltx2_22B_distilled_1_1",
+    "default_model_i2v": "ltx2_22B_distilled_1_1",
     "default_model_ia2v": "ltx2_22B_distilled_1_1",
-    "default_model_v2v": "",
-    "default_model_p2v": "",
+    "default_model_v2v": "ltx2_22B_distilled_1_1",
+    "default_model_p2v": "ltx2_22B_distilled_1_1",
     "default_model_t2i": "",
     "default_model_i2i": "",
     "default_model_cs": "",
-    "default_model_fs": "",
-    "default_model_msr": "",
-    "default_model_ingredients": "",
-    "default_model_outpaint": "",
-    "default_model_cleanplate": "",
-    "default_model_relight": "",
-    "default_model_daynight": "",
-    "default_model_colorize": "",
-    "default_model_upscale": "",
+    "default_model_fs": "ltx2_22B_distilled_1_1",
+    "default_model_msr": "ltx2_22B_distilled_1_1",
+    "default_model_ingredients": "ltx2_22B_distilled_1_1",
+    "default_model_outpaint": "ltx2_22B_distilled_1_1",
+    "default_model_cleanplate": "ltx2_22B_distilled_1_1",
+    "default_model_relight": "ltx2_22B_distilled_1_1",
+    "default_model_daynight": "ltx2_22B_distilled_1_1",
+    "default_model_colorize": "ltx2_22B_distilled_1_1",
+    "default_model_upscale": "ltx2_22B_distilled_1_1",
     "default_model_foley": "",
     # Default LoRAs per job type, "filename:weight, ..." — applied when the
     # user supplied none, so Easy mode never has to think about LoRAs.
