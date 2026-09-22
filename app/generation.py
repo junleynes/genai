@@ -1493,8 +1493,9 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
             catalog = []
         picked = None
         for kw in (
-            "headswap", "head-swap", "head_swap", "faceswap", "face-swap",
-            "face_swap", "identity-swap", "id_swap",
+            "head_swap_v3_rank_adaptive_fro_098",
+            "head_swap_v3", "headswap", "head-swap", "head_swap",
+            "faceswap", "face-swap", "face_swap", "identity-swap", "id_swap",
         ):
             for item in catalog or []:
                 name = (
