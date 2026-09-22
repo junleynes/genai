@@ -1385,6 +1385,61 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                     job.get("id"), jtype_early, keywords,
                 )
 
+    # ── Image+Audio → Video: require an audio-driven talking model ────────
+    if job.get("job_type") == "ia2v" and source.get("audio_guide"):
+        params = job.get("params") or {}
+        requested = params.get("model_type") or params.get("model")
+        explicit = bool(requested) and requested not in ("auto", "")
+        current = str(source.get("model_type") or "")
+        blob = current.lower()
+        audio_ok = any(k in blob for k in (
+            "celebvhq", "celeb_v", "celebv", "multitalk", "infinitetalk",
+            "infinite_talk", "fantasy", "speaking", "avatar", "s2v",
+            "sound2vid", "audio2vid", "talking", "talk",
+        ))
+        if not audio_ok:
+            try:
+                models = list_models_for_job_type(mcp_url, "ia2v", limit=200)
+            except Exception:
+                models = []
+            # Prefer celebvhq, then other talk families
+            def _rank(m):
+                b = f"{m.get('model_type','')} {m.get('name','')}".lower()
+                if "celebvhq" in b or "celeb_v" in b or "celebv" in b:
+                    return 10
+                if "multitalk" in b or "infinitetalk" in b:
+                    return 8
+                if "fantasy" in b or "speaking" in b or "avatar" in b:
+                    return 6
+                if "s2v" in b or "talk" in b:
+                    return 4
+                return 1
+            capable = [m for m in models if _rank(m) > 1]
+            if capable:
+                picked = sorted(capable, key=_rank, reverse=True)[0].get("model_type")
+                if explicit and picked and picked != current:
+                    raise RuntimeError(
+                        f"Model '{current}' cannot use audio for Image+Audio → Video. "
+                        f"Use a CelebV-HQ / MultiTalk / InfiniteTalk model (e.g. '{picked}'), "
+                        "or set Model to Auto."
+                    )
+                if picked and picked != current:
+                    source["model_type"] = picked
+                    logger.info(
+                        "Job %s: ia2v switched '%s' → '%s' (audio-driven)",
+                        job.get("id"), current, picked,
+                    )
+            elif explicit:
+                raise RuntimeError(
+                    f"Model '{current}' cannot drive lips from audio. Install a "
+                    "CelebV-HQ (or MultiTalk / InfiniteTalk) model on WanGP."
+                )
+            else:
+                raise RuntimeError(
+                    "No CelebV-HQ / MultiTalk / audio-driven model is available on "
+                    "this WanGP install. Image+Audio → Video requires one."
+                )
+
     # Resolve configured LoRA names against the WanGP catalogue so admin
     # defaults like "union-control" or a slightly different official filename
     # still activate the right adapter.
@@ -3054,8 +3109,17 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
                 s += 2
             if job_type == "t2v" and ("t2v" in blob or "text" in inp):
                 s += 1
-            if job_type == "ia2v" and ("audio" in inp or "s2v" in blob or "talk" in blob):
-                s += 2
+            if job_type == "ia2v":
+                if "audio" in inp or "s2v" in blob or "talk" in blob:
+                    s += 3
+                # CelebV-HQ / MultiTalk / InfiniteTalk / FantasySpeaking / Avatar
+                # are the models that actually lipsync from audio_guide.
+                if any(k in blob for k in (
+                    "celebvhq", "celeb_v", "celebv", "multitalk", "infinitetalk",
+                    "infinite_talk", "fantasy", "speaking", "avatar", "s2v",
+                    "sound2vid", "audio2vid", "talking",
+                )):
+                    s += 6
             if job_type == "fs" and _supports_reference_images(
                 m.get("model_type", ""), m.get("name", ""), m.get("family", "")
             ):
@@ -3137,6 +3201,29 @@ def _filter_models_for_job_type(models: list[dict], job_type: str) -> list[dict]
                 "No reference-capable models found among %d candidates for %s; "
                 "the references will be ignored by any of them",
                 len(matching), job_type,
+            )
+
+    # ia2v: only models that consume audio (or known talking-head families).
+    # Plain i2v will accept audio_guide and ignore it — lips don't move.
+    if job_type == "ia2v":
+        def _ia2v_capable(m: dict) -> bool:
+            blob = f"{m.get('model_type','')} {m.get('name','')} {m.get('family','')}".lower()
+            inp = [str(x).lower() for x in (m.get("inputs") or [])]
+            if "audio" in inp:
+                return True
+            return any(k in blob for k in (
+                "celebvhq", "celeb_v", "celebv", "multitalk", "infinitetalk",
+                "infinite_talk", "fantasy", "speaking", "avatar", "s2v",
+                "sound2vid", "audio2vid", "talking", "talk",
+            ))
+        capable = [m for m in matching if _ia2v_capable(m)]
+        if capable:
+            matching = capable
+        else:
+            logger.warning(
+                "No audio-driven (CelebV-HQ / MultiTalk / …) models found among "
+                "%d candidates for ia2v; lipsync will not work",
+                len(matching),
             )
 
     ranked = sorted(matching, key=score, reverse=True)

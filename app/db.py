@@ -74,7 +74,7 @@ DEFAULT_SETTINGS = {
     # video/image split cannot express.
     "default_model_t2v": "",
     "default_model_i2v": "",
-    "default_model_ia2v": "",
+    "default_model_ia2v": "celebvhq",
     "default_model_v2v": "",
     "default_model_p2v": "",
     "default_model_t2i": "",
