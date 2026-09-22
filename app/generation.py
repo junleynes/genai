@@ -1445,119 +1445,15 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                     "this WanGP install. Image+Audio → Video requires one."
                 )
 
-    # Resolve configured LoRA names against the WanGP catalogue so admin
-    # defaults like "union-control" or a slightly different official filename
-    # still activate the right adapter.
-    if source.get("activated_loras"):
-        try:
-            catalog, _ = list_loras_for_model(
-                mcp_url, str(source.get("model_type") or "")
-            )
-        except Exception:
-            catalog = []
-        before = list(source["activated_loras"])
-        after = _resolve_lora_against_catalog(before, catalog)
-        if after != before:
-            logger.info(
-                "Job %s: resolved LoRAs %s → %s",
-                job.get("id"), before, after,
-            )
-            source["activated_loras"] = after
-
-    # Pose-driven without a LoRA on an LTX model: activate Union Control by keyword.
-    if (
-        job.get("job_type") == "p2v"
-        and source.get("video_guide")
-        and not source.get("activated_loras")
-        and _needs_control_lora(str(source.get("model_type") or ""))
-    ):
-        try:
-            catalog, _ = list_loras_for_model(
-                mcp_url, str(source.get("model_type") or "")
-            )
-        except Exception:
-            catalog = []
-        for kw in ("union-control", "union_control", "ic-lora-pose", "pose-control"):
-            matched = _resolve_lora_against_catalog([kw], catalog)
-            if matched and matched[0] != kw:
-                source["activated_loras"] = [matched[0]]
-                source["loras_multipliers"] = ["1.0"]
-                logger.info(
-                    "Job %s: p2v auto-activated control LoRA '%s'",
-                    job.get("id"), matched[0],
-                )
-                break
-
-    # Face Swap requires a HeadSwap-style LoRA on most installs.
-    if job.get("job_type") == "fs" and not source.get("activated_loras"):
-        try:
-            catalog, _ = list_loras_for_model(
-                mcp_url, str(source.get("model_type") or "")
-            )
-        except Exception:
-            catalog = []
-        picked = None
-        for kw in (
-            "head_swap_v3_rank_adaptive_fro_098",
-            "head_swap_v3", "headswap", "head-swap", "head_swap",
-            "faceswap", "face-swap", "face_swap", "identity-swap", "id_swap",
-        ):
-            for item in catalog or []:
-                name = (
-                    str(item.get("name") or item.get("path") or item.get("file") or "")
-                    if isinstance(item, dict) else str(item)
-                )
-                if kw in name.lower():
-                    picked = name
-                    break
-            if picked:
-                break
-        if picked:
-            source["activated_loras"] = [picked]
-            source["loras_multipliers"] = ["1.0"]
-            logger.info(
-                "Job %s: fs auto-activated HeadSwap LoRA '%s'",
-                job.get("id"), picked,
-            )
-        else:
-            logger.warning(
-                "Job %s: Face Swap has no HeadSwap LoRA configured or found on "
-                "WanGP — install a headswap adapter or set default_loras_fs in Admin",
-                job.get("id"),
-            )
-
-    # Image+Audio: CelebV-HQ identity LoRA for lipsync / face consistency on LTX.
-    if job.get("job_type") == "ia2v" and not source.get("activated_loras"):
-        try:
-            catalog, _ = list_loras_for_model(
-                mcp_url, str(source.get("model_type") or "")
-            )
-        except Exception:
-            catalog = []
-        picked = None
-        for kw in (
-            "id-lora-celebvhq-ltx2.3",
-            "id-lora-celebvhq",
-            "ltx-2.3-id-lora-celebvhq",
-            "celebvhq-3k", "celebvhq",
-        ):
-            for item in catalog or []:
-                name = (
-                    str(item.get("name") or item.get("path") or item.get("file") or "")
-                    if isinstance(item, dict) else str(item)
-                )
-                if kw in name.lower():
-                    picked = name
-                    break
-            if picked:
-                break
-        if picked:
-            source["activated_loras"] = [picked]
-            source["loras_multipliers"] = ["1.0"]
-            logger.info(
-                "Job %s: ia2v auto-activated CelebV-HQ LoRA '%s'",
-                job.get("id"), picked,
-            )
+    # ── Model resolution ────────────────────────────────────────────────
+    # Every job type that needs a specific model family (guide-capable for a
+    # driving video, reference-capable for fs/msr/cs) is resolved to its FINAL
+    # model_type here, before any LoRA is looked up. LoRA catalogues are
+    # per-model on WanGP, so listing them against a model that is about to be
+    # swapped away finds nothing — a headswap or control LoRA can exist and
+    # still come back "not found" simply because it was asked about the wrong
+    # checkpoint. Model choice must be settled first; LoRA activation reads
+    # that final choice further down.
 
     # ── Guide-capable model enforcement ───────────────────────────────────
     # A guide video only does anything on a VACE-style model. "Auto" used to
@@ -1594,20 +1490,6 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                     "(e.g. Wan 2.1/2.2 VACE) or an LTX-2 model with its "
                     "pose/depth/canny IC LoRA."
                 )
-
-        # LTX-2 gets control from an IC LoRA, not from the checkpoint, so a
-        # guided LTX-2 job with nothing activated will quietly ignore the
-        # guide. Warn loudly — we can't tell which local file is the right
-        # IC LoRA, so this is not something we can fix automatically.
-        final_model = str(source.get("model_type") or "")
-        if _needs_control_lora(final_model) and not source.get("activated_loras"):
-            logger.warning(
-                "Job %s: %s is an LTX-2 model and needs a pose/depth/canny IC "
-                "LoRA for control, but none is activated — the driving video "
-                "will be ignored. Set one in Admin -> Server & Queue "
-                "(default_loras_p2v) or pick one on the Generate page.",
-                job.get("id"), final_model,
-            )
 
         # Pose + reference image: need a model that reads image_refs for
         # identity/background. LTX-2 Distilled + control LoRA only follows
@@ -1649,7 +1531,11 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
     # consume image_refs. "Auto" must resolve to one of them rather than the
     # generic video default, and an explicit pick that can't honour the
     # references should fail loudly instead of returning output that visibly
-    # ignored the reference face/targets.
+    # ignored the reference face/targets. fs covers two related but distinct
+    # outcomes depending on which model family this lands on: a plain
+    # identity/face/swap model does a HEAD swap (needs the HeadSwap LoRA
+    # below); an Animate/VACE-family model does a full BODY swap natively
+    # (no LoRA — see the fs LoRA block further down).
     jtype = job.get("job_type", "t2v")
     if source.get("image_refs") and jtype in ("fs", "msr"):
         params = job.get("params") or {}
@@ -1739,6 +1625,161 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 "support them — they will be ignored. Use a VACE model, the "
                 "LTX-2.3 MSR finetune, or an edit/identity model.",
                 job.get("id"), len(source["image_refs"]), rm,
+            )
+
+    # ── LoRA resolution ─────────────────────────────────────────────────
+    # Runs after model resolution above, so every catalogue lookup below is
+    # against the model that will actually run the job.
+
+    # Resolve configured LoRA names against the WanGP catalogue so admin
+    # defaults like "union-control" or a slightly different official filename
+    # still activate the right adapter.
+    if source.get("activated_loras"):
+        try:
+            catalog, _ = list_loras_for_model(
+                mcp_url, str(source.get("model_type") or "")
+            )
+        except Exception:
+            catalog = []
+        before = list(source["activated_loras"])
+        after = _resolve_lora_against_catalog(before, catalog)
+        if after != before:
+            logger.info(
+                "Job %s: resolved LoRAs %s → %s",
+                job.get("id"), before, after,
+            )
+            source["activated_loras"] = after
+
+    # Pose-driven without a LoRA on an LTX model: activate Union Control by keyword.
+    # (LTX-2 needs this IC LoRA for control; VACE/Animate-family picks above
+    # already do control natively and skip this block via _needs_control_lora.)
+    if (
+        job.get("job_type") == "p2v"
+        and source.get("video_guide")
+        and not source.get("activated_loras")
+        and _needs_control_lora(str(source.get("model_type") or ""))
+    ):
+        try:
+            catalog, _ = list_loras_for_model(
+                mcp_url, str(source.get("model_type") or "")
+            )
+        except Exception:
+            catalog = []
+        for kw in ("union-control", "union_control", "ic-lora-pose", "pose-control"):
+            matched = _resolve_lora_against_catalog([kw], catalog)
+            if matched and matched[0] != kw:
+                source["activated_loras"] = [matched[0]]
+                source["loras_multipliers"] = ["1.0"]
+                logger.info(
+                    "Job %s: p2v auto-activated control LoRA '%s'",
+                    job.get("id"), matched[0],
+                )
+                break
+
+    # LTX-2 gets control from an IC LoRA, not from the checkpoint, so a
+    # guided LTX-2 job (t2v/i2v/p2v) with nothing activated by now will
+    # quietly ignore the guide. Warn loudly — we can't tell which local file
+    # is the right IC LoRA, so this is not something we can fix
+    # automatically. Placed after every LoRA-activation attempt above (config
+    # default, then p2v's keyword fallback) so it only fires when both
+    # genuinely came up empty.
+    if source.get("video_guide"):
+        _guide_model = str(source.get("model_type") or "")
+        if _needs_control_lora(_guide_model) and not source.get("activated_loras"):
+            logger.warning(
+                "Job %s: %s is an LTX-2 model and needs a pose/depth/canny IC "
+                "LoRA for control, but none is activated — the driving video "
+                "will be ignored. Set one in Admin -> Server & Queue "
+                "(default_loras_p2v) or pick one on the Generate page.",
+                job.get("id"), _guide_model,
+            )
+
+    # Face Swap: a plain identity/face/swap model needs a HeadSwap-style LoRA
+    # to do the swap (head swap). An Animate/VACE-family model does full
+    # character replacement (body swap) from its own architecture — image_refs
+    # + video_guide/video_source — and does not take a headswap LoRA, so this
+    # is skipped for that family rather than forcing an unrelated adapter onto
+    # a model that doesn't use one.
+    _fs_model = str(source.get("model_type") or "").lower()
+    _fs_is_body_swap_native = any(k in _fs_model for k in ("animate", "vace"))
+    if (
+        job.get("job_type") == "fs"
+        and not source.get("activated_loras")
+        and not _fs_is_body_swap_native
+    ):
+        try:
+            catalog, _ = list_loras_for_model(
+                mcp_url, str(source.get("model_type") or "")
+            )
+        except Exception:
+            catalog = []
+        picked = None
+        for kw in (
+            "head_swap_v3_rank_adaptive_fro_098",
+            "head_swap_v3", "headswap", "head-swap", "head_swap",
+            "faceswap", "face-swap", "face_swap", "identity-swap", "id_swap",
+        ):
+            for item in catalog or []:
+                name = (
+                    str(item.get("name") or item.get("path") or item.get("file") or "")
+                    if isinstance(item, dict) else str(item)
+                )
+                if kw in name.lower():
+                    picked = name
+                    break
+            if picked:
+                break
+        if picked:
+            source["activated_loras"] = [picked]
+            source["loras_multipliers"] = ["1.0"]
+            logger.info(
+                "Job %s: fs auto-activated HeadSwap LoRA '%s'",
+                job.get("id"), picked,
+            )
+        else:
+            logger.warning(
+                "Job %s: Face Swap has no HeadSwap LoRA configured or found on "
+                "WanGP — install a headswap adapter or set default_loras_fs in Admin",
+                job.get("id"),
+            )
+    elif job.get("job_type") == "fs" and _fs_is_body_swap_native:
+        logger.info(
+            "Job %s: fs resolved to '%s' — full body swap via native "
+            "reference+control, no HeadSwap LoRA needed",
+            job.get("id"), source.get("model_type"),
+        )
+
+    # Image+Audio: CelebV-HQ identity LoRA for lipsync / face consistency on LTX.
+    if job.get("job_type") == "ia2v" and not source.get("activated_loras"):
+        try:
+            catalog, _ = list_loras_for_model(
+                mcp_url, str(source.get("model_type") or "")
+            )
+        except Exception:
+            catalog = []
+        picked = None
+        for kw in (
+            "id-lora-celebvhq-ltx2.3",
+            "id-lora-celebvhq",
+            "ltx-2.3-id-lora-celebvhq",
+            "celebvhq-3k", "celebvhq",
+        ):
+            for item in catalog or []:
+                name = (
+                    str(item.get("name") or item.get("path") or item.get("file") or "")
+                    if isinstance(item, dict) else str(item)
+                )
+                if kw in name.lower():
+                    picked = name
+                    break
+            if picked:
+                break
+        if picked:
+            source["activated_loras"] = [picked]
+            source["loras_multipliers"] = ["1.0"]
+            logger.info(
+                "Job %s: ia2v auto-activated CelebV-HQ LoRA '%s'",
+                job.get("id"), picked,
             )
 
     for key in (

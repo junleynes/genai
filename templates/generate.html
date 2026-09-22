@@ -616,7 +616,13 @@ const AUTO_MODELS = {
 };
 function autoModelLabel() {
   if (currentType === 'ia2v') return 'Auto — LTX-2.3 Distilled + CelebV-HQ LoRA';
-  if (currentType === 'fs') return 'Auto — identity model + HeadSwap LoRA';
+  // fs and msr both resolve away from the plain video default at job time —
+  // the server always swaps to a reference-capable model when references
+  // are supplied (fs: identity/HeadSwap or Animate for a full body swap;
+  // msr: the LTX-2.3 MSR finetune or another reference model), so naming the
+  // video default here would be misleading about what actually runs.
+  if (currentType === 'fs') return 'Auto — identity model + HeadSwap LoRA (or Animate for full body swap)';
+  if (currentType === 'msr') return 'Auto — reference/MSR-capable model';
   const m = isVideoOut() ? AUTO_MODELS.video : AUTO_MODELS.image;
   return m ? `Auto — ${m}` : 'Auto (server default)';
 }

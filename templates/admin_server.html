@@ -132,6 +132,11 @@
         <code>filename:weight, filename2:weight2</code>. Exact filenames or keywords
         (e.g. <code>union-control</code>) both work — genai resolves them against WanGP's
         LoRA list. Pose-driven needs a control LoRA on LTX (Union Control) or a VACE model.
+        Face Swap auto-resolves the model at job time: a plain identity/face/swap model
+        does a <em>head swap</em> (HeadSwap LoRA auto-activates below); an Animate or VACE
+        model does a full <em>body swap</em> natively and skips the LoRA. Any row here is
+        just the starting point — genai overrides it when the job's references need a
+        different model family, and only fails loudly on an explicit, incapable pick.
         Creative Lab rows ship with Lightricks IC-LoRA defaults; install the adapters on WanGP.
       </p>
       <div class="space-y-3">
