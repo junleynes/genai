@@ -45,6 +45,6 @@
   "default_loras_colorize": "ltx-2.3-22b-ic-lora-colorization-0.9.safetensors:1.0",
   "default_loras_upscale": "ltx-2.3-22b-ic-lora-pixel-spatial-upscaler-x2-0.9.safetensors:1.0",
   "default_loras_foley": "ltx-2.3-22b-lora-foley-v2a.safetensors:1.0",
-  "default_loras_fs": "",
+  "default_loras_fs": "headswap.safetensors:1.0",
   "default_loras_msr": ""
 }

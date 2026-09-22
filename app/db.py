@@ -102,7 +102,7 @@ DEFAULT_SETTINGS = {
     "default_loras_t2i": "",
     "default_loras_i2i": "",
     "default_loras_cs": "",
-    "default_loras_fs": "",
+    "default_loras_fs": "headswap.safetensors:1.0",
     "default_loras_msr": "",
     # LTX-2.3 Creative Lab IC-LoRAs
     "default_loras_ingredients": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors:1.0",

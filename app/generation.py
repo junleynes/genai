@@ -1483,6 +1483,43 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 )
                 break
 
+    # Face Swap requires a HeadSwap-style LoRA on most installs.
+    if job.get("job_type") == "fs" and not source.get("activated_loras"):
+        try:
+            catalog, _ = list_loras_for_model(
+                mcp_url, str(source.get("model_type") or "")
+            )
+        except Exception:
+            catalog = []
+        picked = None
+        for kw in (
+            "headswap", "head-swap", "head_swap", "faceswap", "face-swap",
+            "face_swap", "identity-swap", "id_swap",
+        ):
+            for item in catalog or []:
+                name = (
+                    str(item.get("name") or item.get("path") or item.get("file") or "")
+                    if isinstance(item, dict) else str(item)
+                )
+                if kw in name.lower():
+                    picked = name
+                    break
+            if picked:
+                break
+        if picked:
+            source["activated_loras"] = [picked]
+            source["loras_multipliers"] = ["1.0"]
+            logger.info(
+                "Job %s: fs auto-activated HeadSwap LoRA '%s'",
+                job.get("id"), picked,
+            )
+        else:
+            logger.warning(
+                "Job %s: Face Swap has no HeadSwap LoRA configured or found on "
+                "WanGP — install a headswap adapter or set default_loras_fs in Admin",
+                job.get("id"),
+            )
+
     # ── Guide-capable model enforcement ───────────────────────────────────
     # A guide video only does anything on a VACE-style model. "Auto" used to
     # fall through to default_model_type (an LTX2 build), which accepts
