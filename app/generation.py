@@ -1521,6 +1521,37 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 job.get("id"),
             )
 
+    # Image+Audio: CelebV-HQ identity LoRA for lipsync / face consistency on LTX.
+    if job.get("job_type") == "ia2v" and not source.get("activated_loras"):
+        try:
+            catalog, _ = list_loras_for_model(
+                mcp_url, str(source.get("model_type") or "")
+            )
+        except Exception:
+            catalog = []
+        picked = None
+        for kw in (
+            "ltx-2.3-id-lora-celebvhq-3k",
+            "id-lora-celebvhq", "celebvhq-3k", "celebvhq",
+        ):
+            for item in catalog or []:
+                name = (
+                    str(item.get("name") or item.get("path") or item.get("file") or "")
+                    if isinstance(item, dict) else str(item)
+                )
+                if kw in name.lower():
+                    picked = name
+                    break
+            if picked:
+                break
+        if picked:
+            source["activated_loras"] = [picked]
+            source["loras_multipliers"] = ["1.0"]
+            logger.info(
+                "Job %s: ia2v auto-activated CelebV-HQ LoRA '%s'",
+                job.get("id"), picked,
+            )
+
     # ── Guide-capable model enforcement ───────────────────────────────────
     # A guide video only does anything on a VACE-style model. "Auto" used to
     # fall through to default_model_type (an LTX2 build), which accepts
