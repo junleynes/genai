@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}Credits – {{ settings.app_name }}{% endblock %}
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-10">
+  <h1 class="text-3xl font-bold tracking-tight">Credits</h1>
+  <p class="text-slate-500 dark:text-slate-400 mt-1">Give credits to people or groups. Each generation spends credits; failed and cancelled jobs are refunded automatically.</p>
+
+  <div id="cr-root" class="mt-8 space-y-6"><p class="text-slate-500">Loading…</p></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+if (!requireAdmin()) throw new Error('admin');
+
+let DATA = null;
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => Number(n || 0).toLocaleString();
+
+function card(title, sub, body, actions = '') {
+  return `<section class="cr-card">
+    <div class="cr-card-head">
+      <div><h2>${title}</h2>${sub ? `<p>${sub}</p>` : ''}</div>
+      ${actions}
+    </div>
+    ${body}
+  </section>`;
+}
+
+function adjustCtl(type, id) {
+  return `<div class="cr-adjust">
+    <input type="number" step="1" placeholder="±" aria-label="Amount to add or remove" data-adj-type="${type}" data-adj-id="${id}" />
+    <button type="button" class="hf-btn hf-btn-outline cr-sm" data-adj-go="${type}:${id}">Apply</button>
+  </div>`;
+}
+
+function render() {
+  const d = DATA, s = d.settings;
+  const groupOpts = (sel) => `<option value="">No group</option>` +
+    d.groups.map(g => `<option value="${g.id}" ${g.id === sel ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('');
+  const gname = Object.fromEntries(d.groups.map(g => [g.id, g.name]));
+
+  const settingsCard = card('Settings', s.enabled ? '' : '<b>Credits are off</b> — everyone generates for free until you turn them on.', `
+    <div class="cr-settings">
+      <label class="cr-switch"><input type="checkbox" id="cr-enabled" ${s.enabled ? 'checked' : ''}/><span></span>
+        <div><b>Charge credits for generations</b><small>When off, nothing is charged and balances are ignored.</small></div></label>
+      <label class="cr-switch"><input type="checkbox" id="cr-admins" ${s.admins_unlimited ? 'checked' : ''}/><span></span>
+        <div><b>Admins generate for free</b><small>Admins aren’t charged and don’t need a balance.</small></div></label>
+      <label class="cr-field"><span>Sign-up bonus</span>
+        <input type="number" id="cr-bonus" min="0" step="1" value="${s.signup_bonus}" />
+        <small>Personal credits given to each new account.</small></label>
+    </div>`,
+    `<button type="button" class="hf-btn hf-btn-accent" id="cr-save-settings">Save settings</button>`);
+
+  const groupsCard = card('Groups', 'A group has one shared pool. Members spend their personal credits first, then the pool.', `
+    <div class="cr-table-wrap"><table class="cr-table">
+      <thead><tr><th>Group</th><th>Members</th><th class="num">Pool</th><th>Add / remove</th><th></th></tr></thead>
+      <tbody>${d.groups.length ? d.groups.map(g => `<tr>
+        <td><b>${escapeHtml(g.name)}</b></td>
+        <td>${g.members}</td>
+        <td class="num"><b>${fmt(g.credits)}</b></td>
+        <td>${adjustCtl('group', g.id)}</td>
+        <td class="cr-row-actions">
+          <button type="button" class="cr-link" data-rename="${g.id}">Rename</button>
+          <button type="button" class="cr-link cr-danger" data-delete-group="${g.id}">Delete</button>
+        </td></tr>`).join('') : `<tr><td colspan="5" class="cr-empty">No groups yet.</td></tr>`}
+      </tbody></table></div>
+    <form id="cr-new-group" class="cr-inline-form">
+      <input name="name" required maxlength="60" placeholder="New group name, e.g. Promos team" />
+      <input name="credits" type="number" min="0" step="1" placeholder="Starting pool" />
+      <button type="submit" class="hf-btn hf-btn-outline">Create group</button>
+    </form>`);
+
+  const usersCard = card('People', 'Personal balances and group membership.', `
+    <div class="cr-table-wrap"><table class="cr-table">
+      <thead><tr><th>Name</th><th>Group</th><th class="num">Personal</th><th class="num">Can spend</th><th>Add / remove</th></tr></thead>
+      <tbody>${d.users.map(u => {
+        const pool = u.group_id ? (d.groups.find(g => g.id === u.group_id)?.credits || 0) : 0;
+        const exempt = u.role === 'admin' && s.admins_unlimited;
+        return `<tr class="${u.is_active ? '' : 'cr-inactive'}">
+          <td><b>${escapeHtml(u.name || '')}</b>${u.role === 'admin' ? ' <span class="cr-tag">admin</span>' : ''}<br><small>${escapeHtml(u.email || '')}</small></td>
+          <td><select data-user-group="${u.id}" aria-label="Group for ${escapeHtml(u.name || u.email)}">${groupOpts(u.group_id)}</select></td>
+          <td class="num"><b>${fmt(u.credits)}</b></td>
+          <td class="num">${exempt ? '<span class="cr-tag">unlimited</span>' : fmt(u.credits + pool)}</td>
+          <td>${adjustCtl('user', u.id)}</td></tr>`;
+      }).join('')}</tbody></table></div>`);
+
+  const tiers = d.resolution_tiers.map(t => `${t.label} ×${t.multiplier}`).join(' · ');
+  const costsCard = card('Pricing', `Cost = tool’s base × resolution × duration (video and audio: length ÷ ${d.duration_unit_seconds}s, at least ×1), rounded up. Resolution: ${tiers}. Set a tool to 0 to make it free.`, `
+    <div class="cr-costs">${d.tools.map(t => `
+      <label class="cr-cost ${t.status === 'disabled' ? 'is-off' : ''}">
+        <span>${escapeHtml(t.name)}${t.status === 'disabled' ? ' <small>(disabled)</small>' : ''}</span>
+        <input type="number" min="0" step="1" data-cost="${t.id}" value="${t.cost}" placeholder="${t.default}" aria-label="Base cost for ${escapeHtml(t.name)}" />
+      </label>`).join('')}
+    </div>
+    <div class="cr-examples" id="cr-examples"></div>`,
+    `<button type="button" class="hf-btn hf-btn-accent" id="cr-save-costs">Save pricing</button>`);
+
+  const kindLabel = { grant: 'Added', adjust: 'Removed', charge: 'Spent', refund: 'Refunded' };
+  const ledgerCard = card('Recent activity', 'The last 100 credit movements.', `
+    <div class="cr-table-wrap"><table class="cr-table">
+      <thead><tr><th>When</th><th>Account</th><th>What</th><th class="num">Change</th><th class="num">Balance</th><th>Note</th></tr></thead>
+      <tbody>${d.ledger.length ? d.ledger.map(e => `<tr>
+        <td><small>${new Date(e.ts).toLocaleString()}</small></td>
+        <td>${e.account_type === 'group' ? '<span class="cr-tag">group</span> ' : ''}${escapeHtml(e.account_name || '—')}</td>
+        <td>${kindLabel[e.kind] || e.kind}${e.kind === 'charge' || e.kind === 'refund' ? (e.user_name && e.account_type === 'group' ? ` <small>by ${escapeHtml(e.user_name)}</small>` : '') : (e.actor_name ? ` <small>by ${escapeHtml(e.actor_name)}</small>` : '')}</td>
+        <td class="num ${e.delta > 0 ? 'cr-pos' : 'cr-neg'}">${e.delta > 0 ? '+' : ''}${fmt(e.delta)}</td>
+        <td class="num">${fmt(e.balance_after)}</td>
+        <td><small>${escapeHtml(e.note || '')}${e.job_id ? ` <a class="cr-link" href="/jobs">job</a>` : ''}</small></td>
+      </tr>`).join('') : `<tr><td colspan="6" class="cr-empty">No credit activity yet.</td></tr>`}</tbody></table></div>`);
+
+  $('cr-root').innerHTML = settingsCard + groupsCard + usersCard + costsCard + ledgerCard;
+  renderExamples();
+}
+
+// Worked examples so admins can see what their prices mean in practice.
+function renderExamples() {
+  const el = $('cr-examples'); if (!el) return;
+  const base = (id) => Number(document.querySelector(`[data-cost="${id}"]`)?.value || 0);
+  const mult = Object.fromEntries(DATA.resolution_tiers.map(t => [t.label, t.multiplier]));
+  const unit = DATA.duration_unit_seconds;
+  const calc = (id, tier, dur) => {
+    const b = base(id); if (!b) return 0;
+    return Math.max(1, Math.ceil(b * mult[tier] * (dur ? Math.max(1, dur / unit) : 1) - 1e-9));
+  };
+  const ex = [
+    ['Text to Image', 't2i', '720p', 0],
+    ['Text to Video, 480p, 4s', 't2v', 'Up to 480p', 4],
+    ['Text to Video, 720p, 5s', 't2v', '720p', 5],
+    ['Text to Video, 1080p, 8s', 't2v', '1080p', 8],
+    ['Relight, 1080p, 5s', 'relight', '1080p', 5],
+  ];
+  el.innerHTML = '<p>Examples</p>' + ex.map(([label, id, tier, dur]) =>
+    `<span>${label} <b>${fmt(calc(id, tier, dur))}</b></span>`).join('');
+}
+
+async function load() {
+  try { DATA = await API.get('/api/admin/credits'); render(); }
+  catch (e) { $('cr-root').innerHTML = `<p class="text-red-500">${escapeHtml(e.message)}</p>`; }
+}
+
+document.addEventListener('input', (e) => { if (e.target.matches('[data-cost]')) renderExamples(); });
+
+document.addEventListener('change', async (e) => {
+  const sel = e.target.closest('[data-user-group]');
+  if (!sel) return;
+  try {
+    await API.put(`/api/admin/users/${sel.dataset.userGroup}/group`, { group_id: sel.value || null });
+    toast('Group updated', 'success'); load();
+  } catch (err) { toast(err.message, 'error'); load(); }
+});
+
+document.addEventListener('click', async (e) => {
+  const t = e.target;
+  try {
+    if (t.id === 'cr-save-settings') {
+      await API.put('/api/admin/credits/settings', {
+        enabled: $('cr-enabled').checked,
+        admins_unlimited: $('cr-admins').checked,
+        signup_bonus: parseInt($('cr-bonus').value || '0', 10),
+      });
+      toast('Settings saved', 'success'); load(); window.refreshCreditPill?.();
+    } else if (t.id === 'cr-save-costs') {
+      const tool_costs = {};
+      document.querySelectorAll('[data-cost]').forEach(i => {
+        tool_costs[i.dataset.cost] = i.value === '' ? Number(i.placeholder) : parseInt(i.value, 10);
+      });
+      await API.put('/api/admin/credits/settings', { tool_costs });
+      toast('Pricing saved', 'success'); load();
+    } else if (t.dataset.adjGo) {
+      const [type, id] = t.dataset.adjGo.split(':');
+      const input = document.querySelector(`[data-adj-type="${type}"][data-adj-id="${id}"]`);
+      const delta = parseInt(input.value, 10);
+      if (!delta) { toast('Enter a positive or negative amount', 'error'); input.focus(); return; }
+      const note = prompt(delta > 0 ? `Add ${delta} credits — note (optional):` : `Remove ${-delta} credits — note (optional):`, '');
+      if (note === null) return;
+      await API.post('/api/admin/credits/adjust', { account_type: type, account_id: id, delta, note });
+      toast(`${delta > 0 ? 'Added' : 'Removed'} ${Math.abs(delta)} credits`, 'success'); load(); window.refreshCreditPill?.();
+    } else if (t.dataset.rename) {
+      const g = DATA.groups.find(x => x.id === t.dataset.rename);
+      const name = prompt('Rename group', g?.name || '');
+      if (!name || name === g?.name) return;
+      await API.patch(`/api/admin/groups/${g.id}`, { name });
+      toast('Group renamed', 'success'); load();
+    } else if (t.dataset.deleteGroup) {
+      const g = DATA.groups.find(x => x.id === t.dataset.deleteGroup);
+      if (!confirm(`Delete “${g.name}”? Its ${g.members} member(s) become ungrouped and the pool’s ${fmt(g.credits)} credits are removed.`)) return;
+      await API.del(`/api/admin/groups/${g.id}`);
+      toast('Group deleted', 'success'); load();
+    }
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'cr-new-group') return;
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  try {
+    await API.post('/api/admin/groups', { name: fd.get('name'), credits: parseInt(fd.get('credits') || '0', 10) });
+    toast('Group created', 'success'); load();
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+load();
+</script>
+{% endblock %}

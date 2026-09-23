@@ -322,10 +322,12 @@
         <label for="prompt" class="hf-composer-label">Prompt <span id="prompt-req" class="text-red-500">*</span></label>
         <textarea name="prompt" id="prompt" rows="5" placeholder="Describe the motion, style, or scene…"></textarea>
         <div class="hf-composer-foot">
+          <span id="cost-note" class="hf-cost-note" aria-live="polite"></span>
           <span class="hf-muted text-xs hidden sm:inline">Ctrl/⌘ + Enter to generate</span>
           <button type="submit" id="submit-btn" class="hf-btn hf-btn-accent hf-btn-lg">
             <svg class="hf-spark" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2Z"/></svg>
             <span class="submit-label">Generate</span>
+            <span class="submit-cost"></span>
           </button>
         </div>
       </div>
@@ -869,7 +871,55 @@ function updateUI() {
     && !(typeof LIBRARY_SEED !== 'undefined' && LIBRARY_SEED);
   document.getElementById('audio-input').required = needsAudio();
   document.getElementById('video-input').required = needsVideo();
+  refreshCost();
 }
+
+// ─── Credit cost ─────────────────────────────────────────────────────────
+// The server prices the job (one formula, app/credits.py); this just asks
+// it for the settings the form would submit right now.
+let costTimer = null, costSeq = 0, COST_OK = true;
+function costParams() {
+  const adv = currentMode === 'advanced';
+  const form = document.getElementById('gen-form');
+  const resolution = adv ? (form.querySelector('[name="resolution"]')?.value || '832x480')
+                         : presetValues(document.getElementById('easy-preset').value).resolution;
+  const duration = adv ? (form.querySelector('[name="duration_seconds"]')?.value || 4)
+                       : (document.getElementById('easy-duration')?.value || 4);
+  return new URLSearchParams({ job_type: currentType, mode: currentMode, resolution,
+                               duration_seconds: isVideoOut() || currentType === 'foley' ? duration : 0 });
+}
+function refreshCost() {
+  if (!currentType) return;
+  clearTimeout(costTimer);
+  costTimer = setTimeout(async () => {
+    const seq = ++costSeq;
+    const btn = document.getElementById('submit-btn');
+    const tag = btn?.querySelector('.submit-cost');
+    const note = document.getElementById('cost-note');
+    try {
+      const q = await API.get('/api/credits/estimate?' + costParams().toString());
+      if (seq !== costSeq || !tag) return;   // a newer request superseded this one
+      const charged = q.enabled && !q.exempt;
+      tag.textContent = charged ? `${q.cost.toLocaleString()} credit${q.cost === 1 ? '' : 's'}` : '';
+      COST_OK = !charged || q.affordable;
+      note.classList.toggle('is-short', !COST_OK);
+      note.textContent = !charged ? ''
+        : COST_OK ? `${q.available.toLocaleString()} available`
+        : `Needs ${q.cost.toLocaleString()}, you have ${q.available.toLocaleString()}`;
+      btn.disabled = !COST_OK;
+      btn.title = COST_OK ? '' : 'Not enough credits — ask an admin for more';
+    } catch (_) {
+      if (tag) tag.textContent = '';
+      if (note) note.textContent = '';
+      COST_OK = true;
+      if (btn) btn.disabled = false;
+    }
+  }, 180);
+}
+document.getElementById('gen-form').addEventListener('change', refreshCost);
+document.getElementById('gen-form').addEventListener('input', (e) => {
+  if (e.target.matches('[name="duration_seconds"]')) refreshCost();
+});
 
 
 document.querySelectorAll('.type-card').forEach(btn => {
@@ -1060,11 +1110,14 @@ document.getElementById('gen-form').addEventListener('submit', async (e) => {
     btn.disabled = false;
     btnLabel.textContent = 'Generate';
     loadRecent();
+    refreshCost();
+    window.refreshCreditPill?.();
     document.getElementById('recent-feed')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (err) {
     toast(err.message || 'Failed to create job', 'error');
     btn.disabled = false;
     btnLabel.textContent = 'Generate';
+    refreshCost();
   }
 });
 

@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import auth, catalog, db
+from . import auth, catalog, credits, db
 from . import generation as gen_mod
 from .generation import CREATIVE_LAB_TYPES, process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type, list_loras_for_model, try_start_queued_jobs, mcp_discover_tools, mcp_ensure_session
 
@@ -304,6 +304,9 @@ def register(body: RegisterIn):
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    bonus = int(db.get_settings().get("credits_signup_bonus") or 0)
+    if bonus > 0:
+        db.adjust_credits("user", user["id"], bonus, "Sign-up bonus")
     token = auth.create_access_token(user["id"], user["role"])
     return {"token": token, "user": user}
 
@@ -374,6 +377,184 @@ def update_tools(body: ToolStatusIn, admin: dict = Depends(auth.require_admin)):
     current.update(clean)
     db.update_settings({"tool_status": current})
     return {"ok": True, "tools": catalog.all_tools(db.get_settings())}
+
+
+# ─── Credits ──────────────────────────────────────────────────────────────────
+
+def _credits_exempt(user: dict, settings: dict) -> bool:
+    if not settings.get("credits_enabled"):
+        return True
+    return user.get("role") == "admin" and bool(settings.get("credits_admins_unlimited", True))
+
+
+def _charge_or_402(user: dict, settings: dict, job_type: str, params: dict, job_id: str) -> dict:
+    """Price the job and reserve credits. Returns the record to store on the
+    job; raises 402 when the balance can't cover it."""
+    quote = credits.job_cost(settings, job_type, params)
+    if _credits_exempt(user, settings) or quote["cost"] == 0:
+        return {"cost": quote["cost"], "status": "free", **{k: quote[k] for k in (
+            "base", "resolution_multiplier", "duration_multiplier")}}
+    try:
+        rec = db.reserve_credits(user["id"], quote["cost"], job_id)
+    except db.InsufficientCredits as e:
+        raise HTTPException(402, str(e))
+    rec.update({k: quote[k] for k in ("base", "resolution_multiplier", "duration_multiplier")})
+    return rec
+
+
+@app.get("/api/me/credits")
+def my_credits(user: dict = Depends(auth.get_current_user)):
+    s = db.get_settings()
+    return {"enabled": bool(s.get("credits_enabled")), "exempt": _credits_exempt(user, s),
+            **db.credit_balances(user["id"])}
+
+
+@app.get("/api/credits/estimate")
+def credit_estimate(job_type: str, resolution: str = "832x480", duration_seconds: float = 4,
+                    mode: str = "easy", user: dict = Depends(auth.get_current_user)):
+    if job_type not in ALL_JOB_TYPES:
+        raise HTTPException(400, "Unknown job type")
+    s = db.get_settings()
+    if mode == "easy" and job_type in VIDEO_JOB_TYPES:
+        duration_seconds = min(float(duration_seconds), 5)   # mirrors job creation
+    quote = credits.estimate(s, job_type, resolution, duration_seconds)
+    bal = db.credit_balances(user["id"])
+    exempt = _credits_exempt(user, s)
+    return {**quote, "enabled": bool(s.get("credits_enabled")), "exempt": exempt,
+            "available": bal["available"],
+            "affordable": exempt or quote["cost"] <= bal["available"]}
+
+
+class CreditSettingsIn(BaseModel):
+    enabled: Optional[bool] = None
+    admins_unlimited: Optional[bool] = None
+    signup_bonus: Optional[int] = None
+    tool_costs: Optional[dict[str, Any]] = None
+
+
+class CreditAdjustIn(BaseModel):
+    account_type: str            # user | group
+    account_id: str
+    delta: int
+    note: str = ""
+
+
+class GroupIn(BaseModel):
+    name: str
+    credits: int = 0
+
+
+class GroupPatchIn(BaseModel):
+    name: str
+
+
+class UserGroupIn(BaseModel):
+    group_id: Optional[str] = None
+
+
+@app.get("/api/admin/credits")
+def admin_credits(admin: dict = Depends(auth.require_admin)):
+    s = db.get_settings()
+    users = db.get_users()
+    groups = db.get_groups()
+    names = {u["id"]: u.get("name") or u.get("email") for u in users}
+    gnames = {g["id"]: g["name"] for g in groups}
+    ledger = db.get_ledger(100)
+    for e in ledger:
+        kind, _, aid = (e.get("account") or "").partition(":")
+        e["account_type"] = kind
+        e["account_name"] = names.get(aid) if kind == "user" else gnames.get(aid, "(deleted group)")
+        e["user_name"] = names.get(e.get("user_id") or "")
+        e["actor_name"] = names.get(e.get("actor_id") or "")
+    costs = credits.tool_costs(s)
+    return {
+        "settings": {
+            "enabled": bool(s.get("credits_enabled")),
+            "admins_unlimited": bool(s.get("credits_admins_unlimited", True)),
+            "signup_bonus": int(s.get("credits_signup_bonus") or 0),
+        },
+        "tools": [{**t, "cost": costs[t["id"]], "default": credits.DEFAULT_COSTS.get(t["id"], 1)}
+                  for t in catalog.all_tools(s)],
+        "resolution_tiers": [{"label": l, "multiplier": m} for _, m, l in credits.RES_TIERS],
+        "duration_unit_seconds": credits.DURATION_UNIT_S,
+        "users": [{"id": u["id"], "name": u.get("name"), "email": u.get("email"),
+                   "role": u.get("role"), "is_active": u.get("is_active", True),
+                   "credits": int(u.get("credits") or 0), "group_id": u.get("group_id")}
+                  for u in users],
+        "groups": groups,
+        "ledger": ledger,
+    }
+
+
+@app.put("/api/admin/credits/settings")
+def admin_credit_settings(body: CreditSettingsIn, admin: dict = Depends(auth.require_admin)):
+    upd: dict[str, Any] = {}
+    if body.enabled is not None:
+        upd["credits_enabled"] = body.enabled
+    if body.admins_unlimited is not None:
+        upd["credits_admins_unlimited"] = body.admins_unlimited
+    if body.signup_bonus is not None:
+        if body.signup_bonus < 0:
+            raise HTTPException(400, "Sign-up bonus can't be negative")
+        upd["credits_signup_bonus"] = int(body.signup_bonus)
+    if body.tool_costs is not None:
+        try:
+            clean = credits.validate_costs(body.tool_costs)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        merged = dict(db.get_settings().get("credit_tool_costs") or {})
+        merged.update(clean)
+        upd["credit_tool_costs"] = merged
+    db.update_settings(upd)
+    return {"ok": True}
+
+
+@app.post("/api/admin/credits/adjust")
+def admin_adjust_credits(body: CreditAdjustIn, admin: dict = Depends(auth.require_admin)):
+    try:
+        new = db.adjust_credits(body.account_type, body.account_id, body.delta,
+                                body.note.strip(), actor_id=admin["id"])
+    except KeyError as e:
+        raise HTTPException(404, str(e).strip("'"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "balance": new}
+
+
+@app.post("/api/admin/groups")
+def admin_create_group(body: GroupIn, admin: dict = Depends(auth.require_admin)):
+    try:
+        return db.create_group(body.name, body.credits, actor_id=admin["id"])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/api/admin/groups/{group_id}")
+def admin_rename_group(group_id: str, body: GroupPatchIn, admin: dict = Depends(auth.require_admin)):
+    try:
+        return db.rename_group(group_id, body.name)
+    except KeyError:
+        raise HTTPException(404, "Group not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/admin/groups/{group_id}")
+def admin_delete_group(group_id: str, admin: dict = Depends(auth.require_admin)):
+    try:
+        return {"ok": True, "members_ungrouped": db.delete_group(group_id)}
+    except KeyError:
+        raise HTTPException(404, "Group not found")
+
+
+@app.put("/api/admin/users/{user_id}/group")
+def admin_set_user_group(user_id: str, body: UserGroupIn, admin: dict = Depends(auth.require_admin)):
+    if body.group_id and not db.get_group(body.group_id):
+        raise HTTPException(404, "Group not found")
+    updated = db.update_user(user_id, {"group_id": body.group_id})
+    if not updated:
+        raise HTTPException(404, "User not found")
+    return updated
 
 
 def _require_usable_tool(job_type: str) -> None:
@@ -765,7 +946,18 @@ async def retry_job(
         raise HTTPException(400, "Only failed, cancelled, or completed jobs can be retried")
     _require_usable_tool(job.get("job_type") or "")
 
+    # A retry is a new generation, so it's priced and paid for again (the
+    # failed/cancelled attempt was already refunded). Charge the job's owner.
+    owner = db.get_user_by_id(job["user_id"]) or user
+    new_rec = _charge_or_402(owner, db.get_settings(), job.get("job_type") or "",
+                             job.get("params") or {}, job_id)
+    history = list(job.get("credits_history") or [])
+    if job.get("credits"):
+        history.append(job["credits"])
+
     db.update_job(job_id, {
+        "credits": new_rec,
+        "credits_history": history,
         "status": "queued",
         "progress": 0,
         "error": None,
@@ -1081,14 +1273,22 @@ async def create_job(
     if not ok_start and reason != "queued":
         raise HTTPException(429, reason)
 
-    job = db.create_job(
-        user_id=user["id"],
-        job_type=job_type,
-        mode=mode,
-        prompt=prompt_clean or f"{job_type} generation",
-        params=params,
-        title=(title or "").strip(),
-    )
+    job_id = str(uuid4())
+    credit_rec = _charge_or_402(user, settings, job_type, params, job_id)
+    try:
+        job = db.create_job(
+            user_id=user["id"],
+            job_type=job_type,
+            mode=mode,
+            prompt=prompt_clean or f"{job_type} generation",
+            params=params,
+            title=(title or "").strip(),
+            job_id=job_id,
+            extra={"credits": credit_rec},
+        )
+    except Exception:
+        db.refund_record(user["id"], job_id, credit_rec, "Job could not be created")
+        raise
     if ok_start:
         background_tasks.add_task(process_job, job["id"])
     else:
@@ -1272,6 +1472,11 @@ def branding_page(request: Request):
 @app.get("/admin/server", response_class=HTMLResponse)
 def server_page(request: Request):
     return _page(request, "admin_server.html")
+
+
+@app.get("/admin/credits", response_class=HTMLResponse)
+def credits_page(request: Request):
+    return _page(request, "admin_credits.html")
 
 
 @app.get("/admin/tools", response_class=HTMLResponse)

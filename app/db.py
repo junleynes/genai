@@ -14,6 +14,8 @@ USERS_FILE = DATA_DIR / "users.json"
 JOBS_FILE = DATA_DIR / "jobs.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 LIBRARY_FILE = DATA_DIR / "library.json"
+GROUPS_FILE = DATA_DIR / "groups.json"
+LEDGER_FILE = DATA_DIR / "credit_ledger.json"
 
 _lock = threading.Lock()
 
@@ -131,6 +133,11 @@ DEFAULT_SETTINGS = {
     # Per-tool status set in Admin → Tools: enabled | new | coming_soon | disabled.
     # Tools not listed use catalog.DEFAULT_STATUS.
     "tool_status": {},
+    # Credits (Admin → Credits). Off by default so existing installs keep working.
+    "credits_enabled": False,
+    "credits_admins_unlimited": True,   # admins generate without spending
+    "credits_signup_bonus": 0,          # personal credits for new registrations
+    "credit_tool_costs": {},            # {tool_id: base cost}; unset → credits.DEFAULT_COSTS
     "default_resolution": "1280x704",
     "default_steps": 8,
     "default_fps": "24",
@@ -200,6 +207,8 @@ def create_user(email: str, password_hash: str, name: str, role: str = "user") -
             "role": role if role in ("admin", "user") else "user",
             "created_at": _now(),
             "is_active": True,
+            "credits": 0,
+            "group_id": None,
         }
         users.append(user)
         _save(USERS_FILE, users)
@@ -214,6 +223,8 @@ def update_user(user_id: str, updates: dict) -> Optional[dict]:
                 for k, v in updates.items():
                     if k in ("name", "role", "is_active") and v is not None:
                         users[i][k] = v
+                    elif k == "group_id":   # None is meaningful: removes the user from their group
+                        users[i][k] = v or None
                 _save(USERS_FILE, users)
                 return {k: v for k, v in users[i].items() if k != "password_hash"}
         return None
@@ -258,11 +269,13 @@ def create_job(
     prompt: str,
     params: dict,
     title: str = "",
+    job_id: Optional[str] = None,
+    extra: Optional[dict] = None,
 ) -> dict:
     with _lock:
         jobs = _load(JOBS_FILE, [])
         job = {
-            "id": str(uuid4()),
+            "id": job_id or str(uuid4()),
             "user_id": user_id,
             "title": title or prompt[:60] + ("…" if len(prompt) > 60 else ""),
             "job_type": job_type,
@@ -278,6 +291,7 @@ def create_job(
             "created_at": _now(),
             "updated_at": _now(),
             "completed_at": None,
+            **(extra or {}),
         }
         jobs.append(job)
         _save(JOBS_FILE, jobs)
@@ -293,6 +307,11 @@ def update_job(job_id: str, updates: dict) -> Optional[dict]:
                 jobs[i]["updated_at"] = _now()
                 if updates.get("status") in ("completed", "failed"):
                     jobs[i]["completed_at"] = _now()
+                # Every failure path (generation error, timeout, disabled
+                # backend) and cancel ends here, so this is the one place a
+                # reserved charge is returned.
+                if updates.get("status") in REFUNDABLE_STATUSES:
+                    _refund_job_locked(jobs[i], reason=f"Job {updates['status']}")
                 _save(JOBS_FILE, jobs)
                 return jobs[i]
         return None
@@ -309,6 +328,9 @@ def delete_job(job_id: str, user_id: Optional[str] = None) -> bool:
                     new_jobs.append(j)
                 else:
                     found = True
+                    # Deleted before it ever ran: nothing was produced.
+                    if j.get("status") == "queued":
+                        _refund_job_locked(j, reason="Queued job deleted")
             else:
                 new_jobs.append(j)
         if found:
@@ -588,3 +610,235 @@ def library_showcase(user_id: str) -> dict:
         }
         for jt, v in best.items()
     }
+
+
+# ─── Credits: groups, balances, ledger ────────────────────────────────────────
+# Balances live on the user record ("credits") and on groups (shared pool).
+# A charge draws on the user's personal balance first, then their group's
+# pool. Every movement is written to the ledger. All helpers ending in
+# _locked assume the caller already holds _lock (it is not re-entrant).
+
+REFUNDABLE_STATUSES = ("failed", "cancelled", "canceled")
+
+
+class InsufficientCredits(Exception):
+    def __init__(self, needed: int, available: int):
+        super().__init__(f"Not enough credits: this needs {needed}, you have {available}.")
+        self.needed = needed
+        self.available = available
+
+
+def _ledger_add_locked(entries: list, account: str, delta: int, balance_after: int,
+                       kind: str, note: str = "", job_id: Optional[str] = None,
+                       user_id: Optional[str] = None, actor_id: Optional[str] = None) -> None:
+    entries.append({
+        "id": str(uuid4()), "ts": _now(), "kind": kind, "account": account,
+        "delta": int(delta), "balance_after": int(balance_after),
+        "job_id": job_id, "user_id": user_id, "actor_id": actor_id, "note": note,
+    })
+
+
+def get_groups() -> list[dict]:
+    with _lock:
+        groups = _load(GROUPS_FILE, [])
+        users = _load(USERS_FILE, [])
+    for g in groups:
+        g["members"] = sum(1 for u in users if u.get("group_id") == g["id"])
+    return groups
+
+
+def get_group(group_id: Optional[str]) -> Optional[dict]:
+    if not group_id:
+        return None
+    return next((g for g in get_groups() if g["id"] == group_id), None)
+
+
+def create_group(name: str, credits: int = 0, actor_id: Optional[str] = None) -> dict:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Group name is required")
+    with _lock:
+        groups = _load(GROUPS_FILE, [])
+        if any(g["name"].lower() == name.lower() for g in groups):
+            raise ValueError(f"A group named “{name}” already exists")
+        g = {"id": str(uuid4()), "name": name, "credits": 0, "created_at": _now()}
+        groups.append(g)
+        if credits:
+            if credits < 0:
+                raise ValueError("Starting credits can't be negative")
+            g["credits"] = int(credits)
+            ledger = _load(LEDGER_FILE, [])
+            _ledger_add_locked(ledger, f"group:{g['id']}", credits, g["credits"], "grant",
+                               "Starting balance", actor_id=actor_id)
+            _save(LEDGER_FILE, ledger)
+        _save(GROUPS_FILE, groups)
+        return {**g, "members": 0}
+
+
+def rename_group(group_id: str, name: str) -> dict:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Group name is required")
+    with _lock:
+        groups = _load(GROUPS_FILE, [])
+        if any(g["name"].lower() == name.lower() and g["id"] != group_id for g in groups):
+            raise ValueError(f"A group named “{name}” already exists")
+        for g in groups:
+            if g["id"] == group_id:
+                g["name"] = name
+                _save(GROUPS_FILE, groups)
+                return g
+    raise KeyError("Group not found")
+
+
+def delete_group(group_id: str) -> int:
+    """Remove a group; its members become ungrouped. Returns members affected.
+    The pool's remaining balance is discarded (recorded in the ledger)."""
+    with _lock:
+        groups = _load(GROUPS_FILE, [])
+        g = next((x for x in groups if x["id"] == group_id), None)
+        if not g:
+            raise KeyError("Group not found")
+        users = _load(USERS_FILE, [])
+        n = 0
+        for u in users:
+            if u.get("group_id") == group_id:
+                u["group_id"] = None
+                n += 1
+        if g.get("credits"):
+            ledger = _load(LEDGER_FILE, [])
+            _ledger_add_locked(ledger, f"group:{group_id}", -g["credits"], 0, "adjust",
+                               f"Group “{g['name']}” deleted")
+            _save(LEDGER_FILE, ledger)
+        _save(USERS_FILE, users)
+        _save(GROUPS_FILE, [x for x in groups if x["id"] != group_id])
+        return n
+
+
+def credit_balances(user_id: str) -> dict:
+    """{'personal': n, 'group': {...} | None, 'available': n}"""
+    with _lock:
+        users = _load(USERS_FILE, [])
+        groups = _load(GROUPS_FILE, [])
+    u = next((x for x in users if x["id"] == user_id), None) or {}
+    personal = int(u.get("credits") or 0)
+    g = next((x for x in groups if x["id"] == u.get("group_id")), None)
+    group = {"id": g["id"], "name": g["name"], "credits": int(g.get("credits") or 0)} if g else None
+    return {"personal": personal, "group": group,
+            "available": personal + (group["credits"] if group else 0)}
+
+
+def adjust_credits(account_type: str, account_id: str, delta: int, note: str = "",
+                   actor_id: Optional[str] = None) -> int:
+    """Admin grant (+) or deduction (−). Returns the new balance."""
+    delta = int(delta)
+    if delta == 0:
+        raise ValueError("Enter a non-zero amount")
+    with _lock:
+        path = USERS_FILE if account_type == "user" else GROUPS_FILE
+        if account_type not in ("user", "group"):
+            raise ValueError("account_type must be 'user' or 'group'")
+        rows = _load(path, [])
+        row = next((r for r in rows if r["id"] == account_id), None)
+        if not row:
+            raise KeyError(f"{account_type.title()} not found")
+        new = int(row.get("credits") or 0) + delta
+        if new < 0:
+            raise ValueError(f"That would leave a negative balance ({new})")
+        row["credits"] = new
+        ledger = _load(LEDGER_FILE, [])
+        _ledger_add_locked(ledger, f"{account_type}:{account_id}", delta, new,
+                           "grant" if delta > 0 else "adjust", note,
+                           user_id=account_id if account_type == "user" else None,
+                           actor_id=actor_id)
+        _save(path, rows)
+        _save(LEDGER_FILE, ledger)
+        return new
+
+
+def reserve_credits(user_id: str, cost: int, job_id: str) -> dict:
+    """Take `cost` from the user's personal balance, then their group pool.
+    Raises InsufficientCredits. Returns the record stored on the job."""
+    cost = int(cost)
+    with _lock:
+        users = _load(USERS_FILE, [])
+        groups = _load(GROUPS_FILE, [])
+        u = next((x for x in users if x["id"] == user_id), None)
+        if not u:
+            raise KeyError("User not found")
+        g = next((x for x in groups if x["id"] == u.get("group_id")), None)
+        personal = int(u.get("credits") or 0)
+        pool = int(g.get("credits") or 0) if g else 0
+        if personal + pool < cost:
+            raise InsufficientCredits(cost, personal + pool)
+        from_personal = min(personal, cost)
+        from_group = cost - from_personal
+        ledger = _load(LEDGER_FILE, [])
+        if from_personal:
+            u["credits"] = personal - from_personal
+            _ledger_add_locked(ledger, f"user:{user_id}", -from_personal, u["credits"],
+                               "charge", "Generation", job_id=job_id, user_id=user_id)
+        if from_group:
+            g["credits"] = pool - from_group
+            _ledger_add_locked(ledger, f"group:{g['id']}", -from_group, g["credits"],
+                               "charge", "Generation", job_id=job_id, user_id=user_id)
+            _save(GROUPS_FILE, groups)
+        _save(USERS_FILE, users)
+        _save(LEDGER_FILE, ledger)
+        return {"cost": cost, "from_personal": from_personal, "from_group": from_group,
+                "group_id": g["id"] if (g and from_group) else None,
+                "status": "charged", "charged_at": _now()}
+
+
+def _refund_job_locked(job: dict, reason: str) -> None:
+    """Return a job's reserved credits to where they came from. Idempotent:
+    only a record in 'charged' state is refunded, and it's marked 'refunded'."""
+    rec = job.get("credits")
+    if not isinstance(rec, dict) or rec.get("status") != "charged":
+        return
+    users = _load(USERS_FILE, [])
+    groups = _load(GROUPS_FILE, [])
+    ledger = _load(LEDGER_FILE, [])
+    uid = job.get("user_id")
+    u = next((x for x in users if x["id"] == uid), None)
+    back_personal = int(rec.get("from_personal") or 0)
+    back_group = int(rec.get("from_group") or 0)
+    g = next((x for x in groups if x["id"] == rec.get("group_id")), None)
+    if back_group and not g:
+        back_personal += back_group     # the group was deleted: refund to the user
+        back_group = 0
+    if back_personal and u:
+        u["credits"] = int(u.get("credits") or 0) + back_personal
+        _ledger_add_locked(ledger, f"user:{uid}", back_personal, u["credits"],
+                           "refund", reason, job_id=job["id"], user_id=uid)
+    if back_group and g:
+        g["credits"] = int(g.get("credits") or 0) + back_group
+        _ledger_add_locked(ledger, f"group:{g['id']}", back_group, g["credits"],
+                           "refund", reason, job_id=job["id"], user_id=uid)
+    _save(USERS_FILE, users)
+    _save(GROUPS_FILE, groups)
+    _save(LEDGER_FILE, ledger)
+    rec["status"] = "refunded"
+    rec["refunded_at"] = _now()
+
+
+def refund_record(user_id: str, job_id: str, record: dict, reason: str) -> None:
+    """Refund a reservation whose job was never stored (creation failed)."""
+    with _lock:
+        _refund_job_locked({"id": job_id, "user_id": user_id, "credits": record}, reason)
+
+
+def refund_job(job_id: str, reason: str) -> None:
+    """Refund outside update_job (e.g. job creation failed after the charge)."""
+    with _lock:
+        jobs = _load(JOBS_FILE, [])
+        j = next((x for x in jobs if x["id"] == job_id), None)
+        if j:
+            _refund_job_locked(j, reason)
+            _save(JOBS_FILE, jobs)
+
+
+def get_ledger(limit: int = 100) -> list[dict]:
+    with _lock:
+        rows = _load(LEDGER_FILE, [])
+    return list(reversed(rows[-limit:]))

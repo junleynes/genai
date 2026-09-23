@@ -76,7 +76,11 @@ function paramChips(j) {
   if (p.guidance_scale) chips.push('cfg ' + p.guidance_scale);
   if (p.seed !== undefined && p.seed !== null && Number(p.seed) !== -1) chips.push('seed ' + p.seed);
   if (j.backend) chips.push(j.backend);
-  return chips.filter(Boolean).map(c =>
+  const cr = j.credits;
+  const costChip = cr && cr.status && cr.status !== 'free'
+    ? `<span class="hf-cost-chip ${cr.status === 'refunded' ? 'is-refunded' : ''}" title="${cr.status === 'refunded' ? 'Refunded' : 'Credits spent'}">${Number(cr.cost).toLocaleString()} credit${cr.cost === 1 ? '' : 's'}${cr.status === 'refunded' ? ' · refunded' : ''}</span> `
+    : '';
+  return costChip + chips.filter(Boolean).map(c =>
     `<span class="inline-flex px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-600 dark:text-slate-300 font-mono">${escapeHtml(String(c))}</span>`
   ).join(' ');
 }
@@ -142,7 +146,7 @@ function renderJobCard(j) {
 // innerHTML replace would recreate <video> elements every 4s and restart
 // playback even for jobs that finished long ago.
 function jobSignature(j) {
-  return JSON.stringify([j.status, j.progress, j.result_url, j.error, j.title, j.prompt]);
+  return JSON.stringify([j.status, j.progress, j.result_url, j.error, j.title, j.prompt, j.credits && j.credits.status]);
 }
 
 let jobOrder = [];

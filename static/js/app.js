@@ -285,6 +285,7 @@ function renderStudioNav() {
     const name = user.name || user.email || '';
     const initial = (name.trim()[0] || '?').toUpperCase();
     auth.innerHTML = `
+      <a href="/library" id="hf-credits" class="hf-credits" hidden></a>
       <a href="/generate" class="hf-btn hf-btn-accent hf-hide-sm">Create</a>
       <div class="hf-user">
         <button type="button" class="hf-avatar" aria-haspopup="true" aria-expanded="false"
@@ -309,6 +310,7 @@ function renderStudioNav() {
     });
     document.addEventListener('click', (e) => { if (!auth.contains(e.target)) close(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    refreshCreditPill();
   } else {
     auth.innerHTML = `
       <button type="button" class="hf-btn hf-btn-ghost" onclick="openLoginModal()">Log in</button>
@@ -316,6 +318,27 @@ function renderStudioNav() {
   }
 }
 
+
+// ─── Credits balance in the nav ──────────────────────────────────────────
+// Shown only when credits are switched on and the user actually pays
+// (admins may be exempt). Other pages call this after spending or granting.
+async function refreshCreditPill() {
+  const el = document.getElementById('hf-credits');
+  if (!el || !isLoggedIn()) return null;
+  try {
+    const c = await API.get('/api/me/credits');
+    if (!c.enabled || c.exempt) { el.hidden = true; return c; }
+    el.hidden = false;
+    el.innerHTML = `<i aria-hidden="true">C</i>${Number(c.available).toLocaleString()}<span class="sr-only"> credits</span>`;
+    el.title = c.group
+      ? `${c.personal.toLocaleString()} personal + ${c.group.credits.toLocaleString()} from ${c.group.name}`
+      : `${c.personal.toLocaleString()} credits`;
+    el.classList.toggle('is-empty', c.available <= 0);
+    el.classList.toggle('is-low', c.available > 0 && c.available < 10);
+    return c;
+  } catch (_) { el.hidden = true; return null; }
+}
+window.refreshCreditPill = refreshCreditPill;
 
 // ─── Card motion ─────────────────────────────────────────────────────────
 // Staggered reveal as tool cards scroll into view, a pointer-following tilt
