@@ -25,7 +25,21 @@ from pydantic import BaseModel, Field
 
 from . import auth, db
 from . import generation as gen_mod
-from .generation import process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type, list_loras_for_model, try_start_queued_jobs, mcp_discover_tools, mcp_ensure_session
+from .generation import CREATIVE_LAB_TYPES, process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type, list_loras_for_model, try_start_queued_jobs, mcp_discover_tools, mcp_ensure_session
+
+# ─── Job types ─────────────────────────────────────────────────────────────
+# Single source of truth for every place that validates or branches on a job
+# type. Creative Lab types come from generation.CREATIVE_LAB_LORA, so adding
+# a new LTX IC-LoRA card there extends validation, settings and defaults here.
+BASE_JOB_TYPES = ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr")
+ALL_JOB_TYPES = BASE_JOB_TYPES + CREATIVE_LAB_TYPES
+IMAGE_JOB_TYPES = ("t2i", "i2i", "cs")
+VIDEO_JOB_TYPES = tuple(t for t in ALL_JOB_TYPES if t not in IMAGE_JOB_TYPES)
+# Creative Lab cards driven by a still image instead of a source video.
+CREATIVE_IMAGE_INPUT_TYPES = ("ingredients", "cinemagraph")
+CREATIVE_VIDEO_SOURCE_TYPES = tuple(
+    t for t in CREATIVE_LAB_TYPES if t not in CREATIVE_IMAGE_INPUT_TYPES
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("genai")
@@ -100,7 +114,7 @@ class LoginIn(BaseModel):
 
 
 class JobCreateIn(BaseModel):
-    job_type: str = Field(pattern="^(t2v|i2v|t2i|i2i|ia2v|v2v|p2v|cs|fs|msr|ingredients|outpaint|cleanplate|relight|daynight|colorize|upscale|foley)$")
+    job_type: str = Field(pattern="^(" + "|".join(ALL_JOB_TYPES) + ")$")
     mode: str = Field(pattern="^(easy|advanced)$")
     prompt: str = Field(default="", max_length=4000)
     title: str = ""
@@ -170,6 +184,18 @@ class ServerConfigIn(BaseModel):
     default_model_colorize: Optional[str] = None
     default_model_upscale: Optional[str] = None
     default_model_foley: Optional[str] = None
+    default_model_water: Optional[str] = None
+    default_loras_water: Optional[str] = None
+    default_model_deblur: Optional[str] = None
+    default_loras_deblur: Optional[str] = None
+    default_model_decompress: Optional[str] = None
+    default_loras_decompress: Optional[str] = None
+    default_model_crosseyed: Optional[str] = None
+    default_loras_crosseyed: Optional[str] = None
+    default_model_shave: Optional[str] = None
+    default_loras_shave: Optional[str] = None
+    default_model_cinemagraph: Optional[str] = None
+    default_loras_cinemagraph: Optional[str] = None
     default_resolution: str = "1280x704"
     default_steps: int = 8
     default_guidance_scale: float = 7.5
@@ -279,14 +305,14 @@ async def update_server(body: ServerConfigIn, admin: dict = Depends(auth.require
                 (getattr(body, f"default_model_{_jt}") or "").strip()
                 if getattr(body, f"default_model_{_jt}") is not None else None
             )
-            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr", "ingredients", "outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley")
+            for _jt in ALL_JOB_TYPES
         },
         **{
             f"default_loras_{_jt}": (
                 (getattr(body, f"default_loras_{_jt}") or "").strip()
                 if getattr(body, f"default_loras_{_jt}") is not None else None
             )
-            for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr", "ingredients", "outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley")
+            for _jt in ALL_JOB_TYPES
         },
         "default_resolution": (body.default_resolution or "").strip() or "1280x704",
         "default_steps": int(body.default_steps or 8),
@@ -737,7 +763,7 @@ async def api_loras(
     if not resolved:
         per_type = (
             settings.get(f"default_model_{job_type}") or ""
-            if job_type in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr", "ingredients", "outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley")
+            if job_type in ALL_JOB_TYPES
             else ""
         )
         resolved = (per_type or "").strip() or (settings.get("default_model_type") or "").strip()
@@ -800,7 +826,7 @@ async def create_job(
     video_library_id: str = Form(""),
     end_image_library_id: str = Form(""),
 ):
-    allowed = {"t2v", "i2v", "t2i", "i2i", "ia2v", "v2v", "p2v", "cs", "fs", "msr", "ingredients", "outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley"}
+    allowed = set(ALL_JOB_TYPES)
     if job_type not in allowed:
         raise HTTPException(400, f"Invalid job_type. Allowed: {sorted(allowed)}")
     if mode not in ("easy", "advanced"):
@@ -842,7 +868,9 @@ async def create_job(
         raise HTTPException(400, "Video or start image is required for Video → Video")
     if job_type == "ingredients" and not image and not lib_image:
         raise HTTPException(400, "A reference sheet image is required for Ingredients")
-    if job_type in ("outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley"):
+    if job_type == "cinemagraph" and not image and not lib_image:
+        raise HTTPException(400, "A still image is required for Cinemagraph")
+    if job_type in CREATIVE_VIDEO_SOURCE_TYPES:
         if not video and not lib_video:
             raise HTTPException(400, f"A source video is required for {job_type}")
     if job_type == "fs" and not image and not lib_image:
@@ -924,7 +952,7 @@ async def create_job(
         # the broadcast preset legitimately needs more than 25.
         params["steps"] = min(params["steps"], 40)
         params["resolution"] = params.get("resolution") or "832x480"
-        if job_type in ("t2v", "i2v", "ia2v", "v2v", "p2v", "fs", "msr", "ingredients", "outpaint", "cleanplate", "relight", "daynight", "colorize", "upscale", "foley"):
+        if job_type in VIDEO_JOB_TYPES:
             params["duration_seconds"] = min(float(params["duration_seconds"]), 5)
 
     prompt_clean = (prompt or "").strip()

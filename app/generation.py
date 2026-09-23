@@ -294,8 +294,94 @@ CREATIVE_LAB_LORA = {
     "colorize": ("colorization", "colorize"),
     "upscale": ("spatial-upscaler", "spatial_upscaler", "upscaler", "pixel-spatial"),
     "foley": ("foley", "v2a"),
+    "water": ("water-simulation", "water_simulation", "water-sim", "watersim"),
+    "deblur": ("deblur",),
+    "decompress": ("decompression", "decompress"),
+    # Lightricks ships this one under a generic trainer checkpoint name, so
+    # its filename is listed as a keyword alongside the descriptive ones a
+    # renamed copy would carry.
+    "crosseyed": ("cross-eyed", "cross_eyed", "crosseyed", "strabismus",
+                  "lora_weights_step_03000"),
+    "shave": ("instant-shave", "instant_shave", "removebeard", "beard-removal", "shave"),
+    "cinemagraph": ("cinemagraph",),
 }
 CREATIVE_LAB_TYPES = tuple(CREATIVE_LAB_LORA.keys())
+
+# Creative Lab LoRAs trained with a literal trigger token and a dual-panel
+# "Reference shows … Edited shows …" caption. Without the trigger the adapter
+# is loaded but never fires, which looks exactly like the LoRA "not working",
+# so the prompt is built here rather than trusting every user to know it.
+# Formats are copied from each Lightricks model card; "{p}" is the user's
+# prompt (or a neutral stand-in when they left it blank). A prompt that
+# already contains the trigger is sent untouched — assume it is hand-written.
+CREATIVE_LAB_PROMPTS: dict[str, tuple[str, str, str]] = {
+    # jtype: (trigger, template, stand-in used when the prompt is blank)
+    "water": (
+        "ADD WATER",
+        "Reference shows the dry scene. Edited shows the same scene with water "
+        "added. ADD WATER {p}. Subject identity, clothing, framing, and "
+        "background geometry are identical to the reference; only water-related "
+        "elements differ between reference and edited.",
+        "realistic water with natural motion, splashes and wet-surface reflections",
+    ),
+    "deblur": (
+        "DEBLUR",
+        "Reference shows the scene, heavily out of focus with soft defocused blur "
+        "and no fine detail. Edited shows the same scene in sharp focus with crisp "
+        "detail and clean edges. DEBLUR {p}. Subject identity, framing, and "
+        "background geometry are identical to the reference; only focus and "
+        "sharpness differ.",
+        "the scene",
+    ),
+    "decompress": (
+        "ENHANCE QUALITY",
+        "Reference shows the scene, heavily compressed with visible macroblocking, "
+        "chroma bleed, and ringing artifacts. Edited shows the same scene restored "
+        "to high quality with sharp detail, clean edges, and no compression "
+        "artifacts. ENHANCE QUALITY {p}. Subject identity, framing, and background "
+        "geometry are identical to the reference; only compression artifacts and "
+        "image quality differ between reference and edited.",
+        "the scene",
+    ),
+    "shave": (
+        "REMOVEBEARD",
+        "REMOVEBEARD {p}, completely smooth and clean-shaven, bare skin, no beard, "
+        "no stubble, no facial hair.",
+        "the same person and scene",
+    ),
+    "cinemagraph": (
+        "CINEMAGRAPH_MOTION",
+        "CINEMAGRAPH_MOTION {p}. Locked-off static camera, everything else stays "
+        "perfectly still, seamless natural loop.",
+        "subtle natural motion in one element of the scene",
+    ),
+    # crosseyed: the model card gives no trigger token, only a descriptive
+    # prompt — used as the stand-in so a blank prompt still steers it.
+    "crosseyed": (
+        "",
+        "{p}",
+        "A close-up portrait video of a person with permanent severe convergent "
+        "strabismus. Both eyes are continuously turned inward toward the nose "
+        "throughout the shot.",
+    ),
+}
+
+# Model-card negatives, applied only when the user gave none.
+CREATIVE_LAB_NEGATIVES: dict[str, str] = {
+    "shave": "beard, mustache, facial hair, stubble, worst quality, "
+             "inconsistent motion, blurry, jittery, distorted",
+}
+
+
+def _creative_lab_prompt(jtype: str, prompt: str) -> str:
+    spec = CREATIVE_LAB_PROMPTS.get(jtype)
+    if not spec:
+        return prompt
+    trigger, template, stand_in = spec
+    p = (prompt or "").strip()
+    if trigger and trigger.lower() in p.lower():
+        return p
+    return template.format(p=p.rstrip(".") if p else stand_in)
 
 
 def _normalize_lora_list(raw: Any) -> list[dict]:
@@ -617,12 +703,15 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     # retype it every time.
     if jtype == "cs":
         prompt, cs_negative = _build_character_sheet_prompt(prompt, params)
+    elif jtype in CREATIVE_LAB_PROMPTS:
+        prompt = _creative_lab_prompt(jtype, prompt)
 
     settings: dict[str, Any] = {
         "model_type": str(model),
         "prompt": prompt,
         "negative_prompt": (
-            cs_negative if jtype == "cs" else (params.get("negative_prompt") or "")
+            cs_negative if jtype == "cs"
+            else (params.get("negative_prompt") or CREATIVE_LAB_NEGATIVES.get(jtype, ""))
         ),
         "resolution": resolution,
         "num_inference_steps": steps,
@@ -3131,6 +3220,12 @@ _JOB_TYPE_FILTERS = {
     "colorize": {"main_output": "video"},
     "upscale": {"main_output": "video"},
     "foley": {"main_output": "audio"},  # video → foley audio (WanGP may return av)
+    "water": {"main_output": "video"},
+    "deblur": {"main_output": "video"},
+    "decompress": {"main_output": "video"},
+    "crosseyed": {"main_output": "video"},
+    "shave": {"main_output": "video"},
+    "cinemagraph": {"main_output": "video", "inputs": "image"},  # still → loop
     # Pose/control-driven video needs a VACE-style model that accepts a guide
     "p2v": {"main_output": "video", "inputs": "video"},
     # Face swap: identity reference image onto a source video. Needs an

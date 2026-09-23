@@ -177,6 +177,66 @@
              stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
       </span>
     </button>
+
+    <button type="button" data-type="water" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Water Simulation → Video" aria-label="Add water to a clip: rain, surf, rivers, floods and splashes">
+      <img class="type-art" src="/static/img/cards/water.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="deblur" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Deblur → Video" aria-label="Restore sharp focus to blurry or defocused footage">
+      <img class="type-art" src="/static/img/cards/deblur.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="decompress" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Decompress → Video" aria-label="Remove compression artifacts: macroblocking, banding and ringing">
+      <img class="type-art" src="/static/img/cards/decompress.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="crosseyed" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Cross-Eyed → Video" aria-label="Turn a subject's eyes inward in a close-up portrait video">
+      <img class="type-art" src="/static/img/cards/crosseyed.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="shave" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Instant Shave → Video" aria-label="Remove beards and facial hair while keeping identity and motion">
+      <img class="type-art" src="/static/img/cards/shave.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
+
+    <button type="button" data-type="cinemagraph" role="radio" aria-checked="false" tabindex="0"
+      class="type-card" data-label="Cinemagraph" aria-label="Turn a still image into a looping cinemagraph with selective motion">
+      <img class="type-art" src="/static/img/cards/cinemagraph.jpg" alt="" aria-hidden="true"
+           width="900" height="604" loading="lazy" decoding="async" />
+      <span class="type-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </span>
+    </button>
   </div>
 
   <div id="selected-bar" hidden>
@@ -669,10 +729,21 @@ if (!requireAuth()) throw new Error('auth');
 let currentType = null;   // nothing chosen until a card is clicked
 let currentMode = 'easy';
 
-function isVideoOut() { return ['t2v','i2v','ia2v','v2v','p2v','fs','msr','ingredients','outpaint','cleanplate','relight','daynight','colorize','upscale'].includes(currentType); }
-function isCreativeLab() { return ['ingredients','outpaint','cleanplate','relight','daynight','colorize','upscale','foley'].includes(currentType); }
-function isCreativeVideo() { return ['outpaint','cleanplate','relight','daynight','colorize','upscale','foley'].includes(currentType); }
-function needsImage() { return ['i2v','i2i','ia2v','fs','ingredients'].includes(currentType); }
+// Prompt hints for Creative Lab cards whose LoRA needs a trigger word. The
+// server wraps the prompt in the model-card format and adds the trigger, so
+// users only describe the content.
+const CREATIVE_HINTS = {
+  water: 'Optional — what water to add (rain, surf, flood, waterfall…). ADD WATER is added for you',
+  deblur: 'Optional — describe the scene. DEBLUR is added for you',
+  decompress: 'Optional — describe the scene. ENHANCE QUALITY is added for you',
+  crosseyed: 'Optional — describe the subject. Works best on close-up portraits',
+  shave: 'Optional — describe the person and scene. REMOVEBEARD is added for you',
+  cinemagraph: 'Say what moves and what stays still, e.g. “steam rises from the cup, everything else frozen”',
+};
+function isVideoOut() { return ['t2v','i2v','ia2v','v2v','p2v','fs','msr','ingredients','outpaint','cleanplate','relight','daynight','colorize','upscale','water','deblur','decompress','crosseyed','shave','cinemagraph'].includes(currentType); }
+function isCreativeLab() { return ['ingredients','outpaint','cleanplate','relight','daynight','colorize','upscale','foley','water','deblur','decompress','crosseyed','shave','cinemagraph'].includes(currentType); }
+function isCreativeVideo() { return ['outpaint','cleanplate','relight','daynight','colorize','upscale','foley','water','deblur','decompress','crosseyed','shave'].includes(currentType); }
+function needsImage() { return ['i2v','i2i','ia2v','fs','ingredients','cinemagraph'].includes(currentType); }
 function needsAudio() { return currentType === 'ia2v'; }
 function needsVideo() { return ['v2v','fs'].includes(currentType) || isCreativeVideo(); }
 function promptRequired() { return ['t2v','t2i','msr'].includes(currentType); } // creative lab optional
@@ -1066,6 +1137,8 @@ function updateUI() {
       ? 'Reference photo (use an identity/edit model — plain Flux will not match the face)'
       : currentType === 'ingredients'
       ? 'Reference sheet (characters, props, location — required)'
+      : currentType === 'cinemagraph'
+      ? 'Still image (becomes the loop — required)'
       : 'Image';
   }
   document.getElementById('image-req')?.classList.toggle('hidden', usesControl || isSheet || currentType === 'ingredients');
@@ -1084,6 +1157,8 @@ function updateUI() {
       ? 'Optional if you uploaded a photo — otherwise describe age, build, hair, clothing…'
       : currentType === 'ingredients'
       ? 'Describe the action — characters and props come from the reference sheet'
+      : CREATIVE_HINTS[currentType]
+      ? CREATIVE_HINTS[currentType]
       : isCreativeLab()
       ? 'Optional — describe the desired look or leave blank to keep the source'
       : currentType === 'msr'
@@ -1097,7 +1172,7 @@ function updateUI() {
   document.getElementById('prompt-req').classList.toggle('hidden', !promptRequired());
   document.getElementById('prompt').required = promptRequired();
   document.getElementById('image-input').required =
-    ['i2v','i2i','ia2v','fs','ingredients'].includes(currentType)
+    ['i2v','i2i','ia2v','fs','ingredients','cinemagraph'].includes(currentType)
     && !(typeof LIBRARY_SEED !== 'undefined' && LIBRARY_SEED);
   document.getElementById('audio-input').required = needsAudio();
   document.getElementById('video-input').required = needsVideo();

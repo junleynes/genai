@@ -8,7 +8,7 @@ Modern web frontend for **Wan2GP** (WanGP): generate video and images through a 
 
 - **User & role management** — register, login, JWT auth, `admin` / `user` roles
 - **Jobs owned by creator** — every generation is attached to the user who posted it
-- **10 generation types** with **Easy** and **Advanced** modes (see below)
+- **24 generation types** with **Easy** and **Advanced** modes (see below)
 - **Personal library** — completed outputs are filed automatically; favourites and search
 - **Job queue** — concurrency limits, startup recovery of stuck jobs, cancel / retry
 - **Admin Branding** — app name, tagline, footer, logo, favicon, colors
@@ -37,6 +37,12 @@ Modern web frontend for **Wan2GP** (WanGP): generate video and images through a 
 | Colorize | `colorize` | video | B&W source video (LTX IC-LoRA) |
 | Upscale | `upscale` | video | source video (LTX spatial upscaler IC-LoRA) |
 | Foley | `foley` | audio | silent source video (LTX Foley V2A) |
+| Water Simulation | `water` | video | source video (LTX IC-LoRA, `ADD WATER` added automatically) |
+| Deblur | `deblur` | video | blurry source video (LTX IC-LoRA, `DEBLUR` added automatically) |
+| Decompress | `decompress` | video | compressed source video (LTX IC-LoRA, `ENHANCE QUALITY` added automatically) |
+| Cross-Eyed | `crosseyed` | video | close-up portrait video (LTX IC-LoRA) |
+| Instant Shave | `shave` | video | source video with facial hair (LTX IC-LoRA, `REMOVEBEARD` added automatically) |
+| Cinemagraph | `cinemagraph` | video | still image (LTX LoRA, `CINEMAGRAPH_MOTION` added automatically) |
 
 Easy mode uses sensible defaults; Advanced exposes models, LoRAs, steps, guidance, control strength, and more.
 

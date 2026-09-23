@@ -91,6 +91,12 @@ DEFAULT_SETTINGS = {
     "default_model_colorize": "ltx2_22B_distilled_1_1",
     "default_model_upscale": "ltx2_22B_distilled_1_1",
     "default_model_foley": "ltx2_22B_distilled_1_1",
+    "default_model_water": "ltx2_22B_distilled_1_1",
+    "default_model_deblur": "ltx2_22B_distilled_1_1",
+    "default_model_decompress": "ltx2_22B_distilled_1_1",
+    "default_model_crosseyed": "ltx2_22B_distilled_1_1",
+    "default_model_shave": "ltx2_22B_distilled_1_1",
+    "default_model_cinemagraph": "ltx2_22B_distilled_1_1",
     # Default LoRAs per job type, "filename:weight, ..." — applied when the
     # user supplied none, so Easy mode never has to think about LoRAs.
     # Prefer exact WanGP filenames; keywords also resolve (see generation).
@@ -114,6 +120,14 @@ DEFAULT_SETTINGS = {
     "default_loras_colorize": "ltx-2.3-22b-ic-lora-colorization-0.9.safetensors:1.0",
     "default_loras_upscale": "ltx-2.3-22b-ic-lora-pixel-spatial-upscaler-x2-0.9.safetensors:1.0",
     "default_loras_foley": "ltx-2.3-22b-lora-foley-v2a-1.0.safetensors:1.0",
+    # LTX-2.3 Creative Lab — edit/restore adapters (trigger words are added
+    # automatically, see generation.CREATIVE_LAB_PROMPTS)
+    "default_loras_water": "ltx-2.3-22b-ic-lora-water-simulation-0.9.safetensors:1.0",
+    "default_loras_deblur": "ltx-2.3-22b-ic-lora-deblur-0.9.safetensors:1.0",
+    "default_loras_decompress": "ltx-2.3-22b-ic-lora-decompression-0.9.safetensors:1.0",
+    "default_loras_crosseyed": "lora_weights_step_03000.safetensors:1.0",
+    "default_loras_shave": "ltx-2.3-22b-ic-lora-instant-shave-0.9.safetensors:1.0",
+    "default_loras_cinemagraph": "ltx-2.3-22b-lora-cinemagraph-0.9.safetensors:1.0",
     "default_resolution": "1280x704",
     "default_steps": 8,
     "default_fps": "24",
