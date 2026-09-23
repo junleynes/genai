@@ -24,7 +24,7 @@
   <div class="hf-hero-fade" aria-hidden="true"></div>
 
   <div class="hf-hero-inner">
-    <span class="hf-eyebrow"><span class="hf-dot"></span> AI video &amp; image studio · runs on your own GPU</span>
+    <span class="hf-eyebrow"><span class="hf-dot"></span> {{ TOOLS|length }} tools · one studio</span>
     <h1 class="hf-display hf-hero-title">
       {%- if words|length > 1 -%}
         {{ words[:-1]|join(' ') }} <span class="hf-accent-word">{{ words[-1] }}</span>
@@ -33,9 +33,8 @@
       {%- endif -%}
     </h1>
     <p class="hf-lede">
-      Text, images, audio, pose and footage in — cinematic video, stills and sound out.
-      {{ TOOLS|length }} tools, Easy for speed and Advanced for full control, and a personal
-      library that keeps everything you make.
+      Turn ideas and footage into finished video. Write a prompt, drop in a clip or photo,
+      and pick a tool: generate, swap, relight, restore, or add sound.
     </p>
 
     <form class="hf-promptbar" action="/generate" method="get" id="hero-prompt">
@@ -59,7 +58,6 @@
     </form>
 
     <div class="hf-hero-meta">
-      <span><b>{{ TOOLS|length }}</b> tools</span>
       <span><b>LTX-2.3</b> Creative Lab</span>
       <span><b>Easy</b> &amp; <b>Advanced</b> modes</span>
       <span><b>Private</b> — nothing leaves your network</span>

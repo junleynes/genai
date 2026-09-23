@@ -38,7 +38,7 @@ def _save(path: Path, data: Any) -> None:
 
 DEFAULT_SETTINGS = {
     "app_name": "LTX Creative Lab",
-    "tagline": "Simplify AI Video & Image Generation",
+    "tagline": "Your AI creative lab",
     "footer": "© 2026 LTX Creative Lab.",
     "logo_url": "",
     "favicon_url": "",
