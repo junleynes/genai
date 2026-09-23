@@ -104,3 +104,57 @@ def validate_costs(raw: Any) -> dict[str, int]:
             raise ValueError(f"Cost for {tid} must be between 0 and 100000")
         clean[tid] = n
     return clean
+
+
+# ─── Packs (Pricing page) ─────────────────────────────────────────────────────
+
+MAX_PACKS = 8
+
+
+def packs(settings: dict) -> list[dict]:
+    return [p for p in (settings.get("credit_packs") or []) if isinstance(p, dict)]
+
+
+def find_pack(settings: dict, pack_id: str) -> dict | None:
+    return next((p for p in packs(settings) if p.get("id") == pack_id), None)
+
+
+def validate_currency(raw: Any) -> str:
+    code = str(raw or "").strip().upper()
+    if not (len(code) == 3 and code.isalpha()):
+        raise ValueError("Currency must be a 3-letter code, e.g. PHP or USD")
+    return code
+
+
+def validate_packs(raw: Any) -> list[dict]:
+    if not isinstance(raw, list):
+        raise ValueError("packs must be a list")
+    if len(raw) > MAX_PACKS:
+        raise ValueError(f"At most {MAX_PACKS} packs")
+    out, seen = [], set()
+    for i, p in enumerate(raw, 1):
+        if not isinstance(p, dict):
+            raise ValueError(f"Pack {i} is invalid")
+        name = str(p.get("name") or "").strip()[:40]
+        if not name:
+            raise ValueError(f"Pack {i} needs a name")
+        pid = str(p.get("id") or "").strip() or "".join(
+            c if c.isalnum() else "-" for c in name.lower()).strip("-") or f"pack-{i}"
+        base_id, n = pid[:40], 2
+        while pid in seen:
+            pid = f"{base_id}-{n}"; n += 1
+        seen.add(pid)
+        try:
+            amount = int(p.get("credits"))
+            price = round(float(p.get("price")), 2)
+        except (TypeError, ValueError):
+            raise ValueError(f"“{name}”: credits and price must be numbers")
+        if not (1 <= amount <= 10_000_000):
+            raise ValueError(f"“{name}”: credits must be between 1 and 10,000,000")
+        if not (0 <= price <= 100_000_000):
+            raise ValueError(f"“{name}”: price must be 0 or more")
+        out.append({"id": pid, "name": name, "credits": amount,
+                    "price": int(price) if price == int(price) else price,
+                    "desc": str(p.get("desc") or "").strip()[:80],
+                    "popular": bool(p.get("popular"))})
+    return out

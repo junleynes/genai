@@ -16,6 +16,7 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 LIBRARY_FILE = DATA_DIR / "library.json"
 GROUPS_FILE = DATA_DIR / "groups.json"
 LEDGER_FILE = DATA_DIR / "credit_ledger.json"
+REQUESTS_FILE = DATA_DIR / "credit_requests.json"
 
 _lock = threading.Lock()
 
@@ -138,6 +139,18 @@ DEFAULT_SETTINGS = {
     "credits_admins_unlimited": True,   # admins generate without spending
     "credits_signup_bonus": 0,          # personal credits for new registrations
     "credit_tool_costs": {},            # {tool_id: base cost}; unset → credits.DEFAULT_COSTS
+    # Pricing page. Packs are bought outside the app (invoice, bank transfer,
+    # e-wallet…): a user requests a pack, an admin approves it, credits land.
+    "credit_currency": "PHP",
+    "credit_purchase_note": "Send payment using the details your admin gave you, then enter the reference number. Credits are added once an admin confirms payment.",
+    "credit_packs": [
+        {"id": "starter", "name": "Starter", "credits": 100, "price": 500,
+         "desc": "Try every tool", "popular": False},
+        {"id": "creator", "name": "Creator", "credits": 500, "price": 2000,
+         "desc": "For regular projects", "popular": True},
+        {"id": "studio", "name": "Studio", "credits": 2000, "price": 6500,
+         "desc": "Teams and heavy use", "popular": False},
+    ],
     "default_resolution": "1280x704",
     "default_steps": 8,
     "default_fps": "24",
@@ -728,32 +741,38 @@ def credit_balances(user_id: str) -> dict:
             "available": personal + (group["credits"] if group else 0)}
 
 
-def adjust_credits(account_type: str, account_id: str, delta: int, note: str = "",
-                   actor_id: Optional[str] = None) -> int:
-    """Admin grant (+) or deduction (−). Returns the new balance."""
+def _adjust_locked(account_type: str, account_id: str, delta: int, note: str = "",
+                   actor_id: Optional[str] = None, kind: Optional[str] = None) -> int:
+    """Grant (+) or deduct (−) with _lock held. Returns the new balance."""
     delta = int(delta)
     if delta == 0:
         raise ValueError("Enter a non-zero amount")
+    if account_type not in ("user", "group"):
+        raise ValueError("account_type must be 'user' or 'group'")
+    path = USERS_FILE if account_type == "user" else GROUPS_FILE
+    rows = _load(path, [])
+    row = next((r for r in rows if r["id"] == account_id), None)
+    if not row:
+        raise KeyError(f"{account_type.title()} not found")
+    new = int(row.get("credits") or 0) + delta
+    if new < 0:
+        raise ValueError(f"That would leave a negative balance ({new})")
+    row["credits"] = new
+    ledger = _load(LEDGER_FILE, [])
+    _ledger_add_locked(ledger, f"{account_type}:{account_id}", delta, new,
+                       kind or ("grant" if delta > 0 else "adjust"), note,
+                       user_id=account_id if account_type == "user" else None,
+                       actor_id=actor_id)
+    _save(path, rows)
+    _save(LEDGER_FILE, ledger)
+    return new
+
+
+def adjust_credits(account_type: str, account_id: str, delta: int, note: str = "",
+                   actor_id: Optional[str] = None) -> int:
+    """Admin grant (+) or deduction (−). Returns the new balance."""
     with _lock:
-        path = USERS_FILE if account_type == "user" else GROUPS_FILE
-        if account_type not in ("user", "group"):
-            raise ValueError("account_type must be 'user' or 'group'")
-        rows = _load(path, [])
-        row = next((r for r in rows if r["id"] == account_id), None)
-        if not row:
-            raise KeyError(f"{account_type.title()} not found")
-        new = int(row.get("credits") or 0) + delta
-        if new < 0:
-            raise ValueError(f"That would leave a negative balance ({new})")
-        row["credits"] = new
-        ledger = _load(LEDGER_FILE, [])
-        _ledger_add_locked(ledger, f"{account_type}:{account_id}", delta, new,
-                           "grant" if delta > 0 else "adjust", note,
-                           user_id=account_id if account_type == "user" else None,
-                           actor_id=actor_id)
-        _save(path, rows)
-        _save(LEDGER_FILE, ledger)
-        return new
+        return _adjust_locked(account_type, account_id, delta, note, actor_id)
 
 
 def reserve_credits(user_id: str, cost: int, job_id: str) -> dict:
@@ -842,3 +861,90 @@ def get_ledger(limit: int = 100) -> list[dict]:
     with _lock:
         rows = _load(LEDGER_FILE, [])
     return list(reversed(rows[-limit:]))
+
+
+# ─── Credit pack requests (Pricing page) ──────────────────────────────────────
+# A user asks for a pack; an admin approves (credits are granted and logged
+# as a "purchase") or rejects. Payment itself happens outside the app.
+
+MAX_PENDING_REQUESTS = 3
+
+
+def get_credit_requests(user_id: Optional[str] = None, limit: int = 200) -> list[dict]:
+    with _lock:
+        rows = _load(REQUESTS_FILE, [])
+    if user_id:
+        rows = [r for r in rows if r["user_id"] == user_id]
+    rows = sorted(rows, key=lambda r: r["created_at"], reverse=True)
+    return rows[:limit]
+
+
+def create_credit_request(user_id: str, pack: dict, currency: str, target: str,
+                          reference: str = "", note: str = "") -> dict:
+    if target not in ("user", "group"):
+        raise ValueError("Choose where the credits go")
+    with _lock:
+        users = _load(USERS_FILE, [])
+        u = next((x for x in users if x["id"] == user_id), None)
+        if not u:
+            raise KeyError("User not found")
+        group_id = u.get("group_id") if target == "group" else None
+        if target == "group" and not group_id:
+            raise ValueError("You're not in a group")
+        rows = _load(REQUESTS_FILE, [])
+        pending = sum(1 for r in rows if r["user_id"] == user_id and r["status"] == "pending")
+        if pending >= MAX_PENDING_REQUESTS:
+            raise ValueError(f"You already have {pending} requests waiting. "
+                             "Cancel one or wait for an admin to review them.")
+        r = {
+            "id": str(uuid4()), "user_id": user_id, "status": "pending",
+            "pack_id": pack["id"], "pack_name": pack["name"],
+            "credits": int(pack["credits"]), "price": pack["price"], "currency": currency,
+            "target": target, "group_id": group_id,
+            "reference": (reference or "").strip()[:120], "note": (note or "").strip()[:500],
+            "created_at": _now(), "decided_at": None, "decided_by": None, "reason": "",
+        }
+        rows.append(r)
+        _save(REQUESTS_FILE, rows)
+        return r
+
+
+def cancel_credit_request(request_id: str, user_id: str) -> dict:
+    with _lock:
+        rows = _load(REQUESTS_FILE, [])
+        r = next((x for x in rows if x["id"] == request_id and x["user_id"] == user_id), None)
+        if not r:
+            raise KeyError("Request not found")
+        if r["status"] != "pending":
+            raise ValueError(f"This request is already {r['status']}")
+        r.update(status="cancelled", decided_at=_now(), decided_by=user_id)
+        _save(REQUESTS_FILE, rows)
+        return r
+
+
+def decide_credit_request(request_id: str, approve: bool, actor_id: str,
+                          reason: str = "") -> dict:
+    """Approve (grant the pack's credits) or reject a pending request."""
+    with _lock:
+        rows = _load(REQUESTS_FILE, [])
+        r = next((x for x in rows if x["id"] == request_id), None)
+        if not r:
+            raise KeyError("Request not found")
+        if r["status"] != "pending":
+            raise ValueError(f"This request is already {r['status']}")
+        if approve:
+            # A group request goes to the pool it named; if that group has
+            # since been deleted, the credits go to the requester instead.
+            acct_type, acct_id = "user", r["user_id"]
+            if r["target"] == "group" and r.get("group_id"):
+                if any(g["id"] == r["group_id"] for g in _load(GROUPS_FILE, [])):
+                    acct_type, acct_id = "group", r["group_id"]
+            label = f"{r['pack_name']} pack"
+            if r.get("reference"):
+                label += f" · ref {r['reference']}"
+            _adjust_locked(acct_type, acct_id, r["credits"], label, actor_id, kind="purchase")
+            r["credited_to"] = f"{acct_type}:{acct_id}"
+        r.update(status="approved" if approve else "rejected", decided_at=_now(),
+                 decided_by=actor_id, reason=(reason or "").strip()[:300])
+        _save(REQUESTS_FILE, rows)
+        return r

@@ -86,7 +86,7 @@ function render() {
       }).join('')}</tbody></table></div>`);
 
   const tiers = d.resolution_tiers.map(t => `${t.label} ×${t.multiplier}`).join(' · ');
-  const costsCard = card('Pricing', `Cost = tool’s base × resolution × duration (video and audio: length ÷ ${d.duration_unit_seconds}s, at least ×1), rounded up. Resolution: ${tiers}. Set a tool to 0 to make it free.`, `
+  const costsCard = card('Cost per tool', `Cost = tool’s base × resolution × duration (video and audio: length ÷ ${d.duration_unit_seconds}s, at least ×1), rounded up. Resolution: ${tiers}. Set a tool to 0 to make it free.`, `
     <div class="cr-costs">${d.tools.map(t => `
       <label class="cr-cost ${t.status === 'disabled' ? 'is-off' : ''}">
         <span>${escapeHtml(t.name)}${t.status === 'disabled' ? ' <small>(disabled)</small>' : ''}</span>
@@ -94,9 +94,56 @@ function render() {
       </label>`).join('')}
     </div>
     <div class="cr-examples" id="cr-examples"></div>`,
-    `<button type="button" class="hf-btn hf-btn-accent" id="cr-save-costs">Save pricing</button>`);
+    `<button type="button" class="hf-btn hf-btn-accent" id="cr-save-costs">Save costs</button>`);
 
-  const kindLabel = { grant: 'Added', adjust: 'Removed', charge: 'Spent', refund: 'Refunded' };
+  const cur = s.currency;
+  const money = (v) => { try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur, maximumFractionDigits: Number.isInteger(Number(v)) ? 0 : 2 }).format(v); } catch (_) { return `${cur} ${fmt(v)}`; } };
+  const pending = d.requests.filter(r => r.status === 'pending');
+  const decided = d.requests.filter(r => r.status !== 'pending').slice(0, 20);
+  const statusLabel = { approved: 'Approved', rejected: 'Declined', cancelled: 'Cancelled by user' };
+  const reqRow = (r) => `<tr>
+      <td><b>${escapeHtml(r.user_name)}</b><br><small>${new Date(r.created_at).toLocaleString()}</small></td>
+      <td><b>${escapeHtml(r.pack_name)}</b><br><small>${fmt(r.credits)} credits · ${money(r.price)}</small></td>
+      <td>${r.target === 'group' ? `<span class="cr-tag">group</span> ${escapeHtml(r.group_name || '(deleted group)')}` : 'Personal'}</td>
+      <td><small>${r.reference ? 'Ref <b>' + escapeHtml(r.reference) + '</b>' : '—'}${r.note ? '<br>' + escapeHtml(r.note) : ''}</small></td>
+      <td class="cr-row-actions">${r.status === 'pending'
+        ? `<button type="button" class="hf-btn hf-btn-accent cr-sm" data-approve="${r.id}">Approve</button>
+           <button type="button" class="cr-link cr-danger" data-reject="${r.id}">Decline</button>`
+        : `<span class="cr-req-status is-${r.status}">${statusLabel[r.status] || r.status}</span>${r.decided_by_name && r.status !== 'cancelled' ? `<br><small>by ${escapeHtml(r.decided_by_name)}</small>` : ''}${r.reason ? `<br><small>“${escapeHtml(r.reason)}”</small>` : ''}`}</td>
+    </tr>`;
+  const reqHead = `<thead><tr><th>Requested by</th><th>Pack</th><th>Goes to</th><th>Payment</th><th></th></tr></thead>`;
+  const requestsCard = card(`Credit requests${pending.length ? ` <span class="cr-count">${pending.length}</span>` : ''}`,
+    'People request a pack from the Pricing page. Check the payment, then approve to add the credits.', `
+    <div class="cr-table-wrap"><table class="cr-table">${reqHead}
+      <tbody>${pending.length ? pending.map(reqRow).join('') : `<tr><td colspan="5" class="cr-empty">Nothing waiting for review.</td></tr>`}</tbody></table></div>
+    ${decided.length ? `<details class="cr-history"><summary>Recent decisions (${decided.length})</summary>
+      <div class="cr-table-wrap"><table class="cr-table">${reqHead}<tbody>${decided.map(reqRow).join('')}</tbody></table></div></details>` : ''}`);
+
+  const packRow = (p, i) => `<div class="cr-pack" data-pack-row="${i}">
+      <input data-f="name" value="${escapeHtml(p.name)}" maxlength="40" placeholder="Name" aria-label="Pack name" />
+      <input data-f="credits" type="number" min="1" step="1" value="${p.credits}" aria-label="Credits" />
+      <input data-f="price" type="number" min="0" step="0.01" value="${p.price}" aria-label="Price" />
+      <input data-f="desc" value="${escapeHtml(p.desc || '')}" maxlength="80" placeholder="Short description" aria-label="Description" />
+      <label class="cr-pack-pop"><input data-f="popular" type="checkbox" ${p.popular ? 'checked' : ''}/> Popular</label>
+      <input data-f="id" type="hidden" value="${escapeHtml(p.id || '')}" />
+      <button type="button" class="cr-link cr-danger" data-remove-pack="${i}" aria-label="Remove ${escapeHtml(p.name)}">Remove</button>
+    </div>`;
+  const packsCard = card('Credit packs', 'Shown on the Pricing page. Payment happens outside the app — people send a request with their payment reference and you approve it.', `
+    <div class="cr-pack-head"><span>Name</span><span>Credits</span><span>Price (${escapeHtml(cur)})</span><span>Description</span><span></span><span></span></div>
+    <div id="cr-packs">${d.packs.map(packRow).join('')}</div>
+    <button type="button" class="hf-btn hf-btn-outline cr-sm" id="cr-add-pack" style="margin-top:10px">Add pack</button>
+    <div class="cr-settings" style="margin-top:18px">
+      <label class="cr-field"><span>Currency</span>
+        <input id="cr-currency" maxlength="3" value="${escapeHtml(cur)}" style="text-transform:uppercase;width:100px" />
+        <small>3-letter code, e.g. PHP, USD.</small></label>
+      <label class="cr-field" style="grid-column: span 2"><span>Payment instructions</span>
+        <textarea id="cr-purchase-note" rows="3" maxlength="600" style="width:100%">${escapeHtml(s.purchase_note)}</textarea>
+        <small>Shown when someone requests a pack — e.g. account details or who to pay.</small></label>
+    </div>`,
+    `<div class="flex gap-2"><a class="hf-btn hf-btn-outline" href="/pricing" target="_blank" rel="noopener">View page</a>
+     <button type="button" class="hf-btn hf-btn-accent" id="cr-save-packs">Save packs</button></div>`);
+
+  const kindLabel = { grant: 'Added', adjust: 'Removed', charge: 'Spent', refund: 'Refunded', purchase: 'Bought' };
   const ledgerCard = card('Recent activity', 'The last 100 credit movements.', `
     <div class="cr-table-wrap"><table class="cr-table">
       <thead><tr><th>When</th><th>Account</th><th>What</th><th class="num">Change</th><th class="num">Balance</th><th>Note</th></tr></thead>
@@ -109,7 +156,7 @@ function render() {
         <td><small>${escapeHtml(e.note || '')}${e.job_id ? ` <a class="cr-link" href="/jobs">job</a>` : ''}</small></td>
       </tr>`).join('') : `<tr><td colspan="6" class="cr-empty">No credit activity yet.</td></tr>`}</tbody></table></div>`);
 
-  $('cr-root').innerHTML = settingsCard + groupsCard + usersCard + costsCard + ledgerCard;
+  $('cr-root').innerHTML = settingsCard + requestsCard + groupsCard + usersCard + packsCard + costsCard + ledgerCard;
   renderExamples();
 }
 
@@ -132,6 +179,15 @@ function renderExamples() {
   ];
   el.innerHTML = '<p>Examples</p>' + ex.map(([label, id, tier, dur]) =>
     `<span>${label} <b>${fmt(calc(id, tier, dur))}</b></span>`).join('');
+}
+
+// Current pack editor values (keeps unsaved edits across add/remove).
+function readPacks() {
+  return [...document.querySelectorAll('[data-pack-row]')].map(row => {
+    const f = (k) => row.querySelector(`[data-f="${k}"]`);
+    return { id: f('id').value, name: f('name').value.trim(), credits: Number(f('credits').value),
+             price: Number(f('price').value), desc: f('desc').value.trim(), popular: f('popular').checked };
+  });
 }
 
 async function load() {
@@ -166,7 +222,7 @@ document.addEventListener('click', async (e) => {
         tool_costs[i.dataset.cost] = i.value === '' ? Number(i.placeholder) : parseInt(i.value, 10);
       });
       await API.put('/api/admin/credits/settings', { tool_costs });
-      toast('Pricing saved', 'success'); load();
+      toast('Costs saved', 'success'); load();
     } else if (t.dataset.adjGo) {
       const [type, id] = t.dataset.adjGo.split(':');
       const input = document.querySelector(`[data-adj-type="${type}"][data-adj-id="${id}"]`);
@@ -176,6 +232,30 @@ document.addEventListener('click', async (e) => {
       if (note === null) return;
       await API.post('/api/admin/credits/adjust', { account_type: type, account_id: id, delta, note });
       toast(`${delta > 0 ? 'Added' : 'Removed'} ${Math.abs(delta)} credits`, 'success'); load(); window.refreshCreditPill?.();
+    } else if (t.id === 'cr-add-pack') {
+      DATA.packs = readPacks();
+      DATA.packs.push({ id: '', name: '', credits: 100, price: 0, desc: '', popular: false });
+      render();
+      document.querySelector(`[data-pack-row="${DATA.packs.length - 1}"] [data-f="name"]`)?.focus();
+    } else if (t.dataset.removePack !== undefined) {
+      DATA.packs = readPacks();
+      DATA.packs.splice(Number(t.dataset.removePack), 1);
+      render();
+    } else if (t.id === 'cr-save-packs') {
+      await API.put('/api/admin/credits/settings', {
+        packs: readPacks(), currency: $('cr-currency').value, purchase_note: $('cr-purchase-note').value,
+      });
+      toast('Packs saved', 'success'); load();
+    } else if (t.dataset.approve) {
+      const r = DATA.requests.find(x => x.id === t.dataset.approve);
+      if (!confirm(`Add ${fmt(r.credits)} credits to ${r.target === 'group' ? (r.group_name || 'the group') + ' pool' : r.user_name}?`)) return;
+      await API.post(`/api/admin/credits/requests/${r.id}/approve`, {});
+      toast(`Approved — ${fmt(r.credits)} credits added`, 'success'); load(); window.refreshCreditPill?.();
+    } else if (t.dataset.reject) {
+      const reason = prompt('Decline this request — reason shown to the user (optional):', '');
+      if (reason === null) return;
+      await API.post(`/api/admin/credits/requests/${t.dataset.reject}/reject`, { reason });
+      toast('Request declined', 'success'); load();
     } else if (t.dataset.rename) {
       const g = DATA.groups.find(x => x.id === t.dataset.rename);
       const name = prompt('Rename group', g?.name || '');

@@ -430,6 +430,9 @@ class CreditSettingsIn(BaseModel):
     admins_unlimited: Optional[bool] = None
     signup_bonus: Optional[int] = None
     tool_costs: Optional[dict[str, Any]] = None
+    packs: Optional[list[Any]] = None
+    currency: Optional[str] = None
+    purchase_note: Optional[str] = None
 
 
 class CreditAdjustIn(BaseModel):
@@ -472,7 +475,11 @@ def admin_credits(admin: dict = Depends(auth.require_admin)):
             "enabled": bool(s.get("credits_enabled")),
             "admins_unlimited": bool(s.get("credits_admins_unlimited", True)),
             "signup_bonus": int(s.get("credits_signup_bonus") or 0),
+            "currency": s.get("credit_currency") or "PHP",
+            "purchase_note": s.get("credit_purchase_note") or "",
         },
+        "packs": credits.packs(s),
+        "requests": [_request_view(r, names, gnames) for r in db.get_credit_requests(limit=100)],
         "tools": [{**t, "cost": costs[t["id"]], "default": credits.DEFAULT_COSTS.get(t["id"], 1)}
                   for t in catalog.all_tools(s)],
         "resolution_tiers": [{"label": l, "multiplier": m} for _, m, l in credits.RES_TIERS],
@@ -505,8 +512,108 @@ def admin_credit_settings(body: CreditSettingsIn, admin: dict = Depends(auth.req
         merged = dict(db.get_settings().get("credit_tool_costs") or {})
         merged.update(clean)
         upd["credit_tool_costs"] = merged
+    try:
+        if body.packs is not None:
+            upd["credit_packs"] = credits.validate_packs(body.packs)
+        if body.currency is not None:
+            upd["credit_currency"] = credits.validate_currency(body.currency)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if body.purchase_note is not None:
+        upd["credit_purchase_note"] = body.purchase_note.strip()[:600]
     db.update_settings(upd)
     return {"ok": True}
+
+
+def _request_view(r: dict, names: dict, gnames: dict) -> dict:
+    return {**r, "user_name": names.get(r["user_id"], "(deleted user)"),
+            "group_name": gnames.get(r.get("group_id") or "", None),
+            "decided_by_name": names.get(r.get("decided_by") or "", None)}
+
+
+# ─── Pricing (public) and pack requests ──────────────────────────────────────
+
+@app.get("/api/pricing")
+def pricing():
+    """Public: packs, per-tool base costs and the multipliers, for /pricing."""
+    s = db.get_settings()
+    costs = credits.tool_costs(s)
+    return {
+        "enabled": bool(s.get("credits_enabled")),
+        "currency": s.get("credit_currency") or "PHP",
+        "purchase_note": s.get("credit_purchase_note") or "",
+        "packs": credits.packs(s),
+        "tools": [{"id": t["id"], "name": t["name"], "cat": t["cat"], "status": t["status"],
+                   "cost": costs[t["id"]], "image": t["id"] in credits.IMAGE_OUTPUT}
+                  for t in catalog.visible_tools(s)],
+        "categories": [{"id": c["id"], "name": c["name"]}
+                       for c in catalog.categories_for(catalog.visible_tools(s))],
+        "resolution_tiers": [{"label": l, "multiplier": m} for _, m, l in credits.RES_TIERS],
+        "duration_unit_seconds": credits.DURATION_UNIT_S,
+        "signup_bonus": int(s.get("credits_signup_bonus") or 0),
+    }
+
+
+class CreditRequestIn(BaseModel):
+    pack_id: str
+    target: str = "user"          # user | group
+    reference: str = ""
+    note: str = ""
+
+
+class CreditDecisionIn(BaseModel):
+    reason: str = ""
+
+
+@app.get("/api/me/credit-requests")
+def my_credit_requests(user: dict = Depends(auth.get_current_user)):
+    return db.get_credit_requests(user_id=user["id"], limit=50)
+
+
+@app.post("/api/credits/requests")
+def request_credits(body: CreditRequestIn, user: dict = Depends(auth.get_current_user)):
+    s = db.get_settings()
+    pack = credits.find_pack(s, body.pack_id)
+    if not pack:
+        raise HTTPException(404, "That pack is no longer offered")
+    try:
+        return db.create_credit_request(user["id"], pack, s.get("credit_currency") or "PHP",
+                                        body.target, body.reference, body.note)
+    except KeyError as e:
+        raise HTTPException(404, str(e).strip("'"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/credits/requests/{request_id}/cancel")
+def cancel_credit_request(request_id: str, user: dict = Depends(auth.get_current_user)):
+    try:
+        return db.cancel_credit_request(request_id, user["id"])
+    except KeyError:
+        raise HTTPException(404, "Request not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+def _decide(request_id: str, approve: bool, body: CreditDecisionIn, admin: dict) -> dict:
+    try:
+        return db.decide_credit_request(request_id, approve, admin["id"], body.reason)
+    except KeyError as e:
+        raise HTTPException(404, str(e).strip("'"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/admin/credits/requests/{request_id}/approve")
+def approve_credit_request(request_id: str, body: CreditDecisionIn = CreditDecisionIn(),
+                           admin: dict = Depends(auth.require_admin)):
+    return _decide(request_id, True, body, admin)
+
+
+@app.post("/api/admin/credits/requests/{request_id}/reject")
+def reject_credit_request(request_id: str, body: CreditDecisionIn = CreditDecisionIn(),
+                          admin: dict = Depends(auth.require_admin)):
+    return _decide(request_id, False, body, admin)
 
 
 @app.post("/api/admin/credits/adjust")
@@ -1472,6 +1579,11 @@ def branding_page(request: Request):
 @app.get("/admin/server", response_class=HTMLResponse)
 def server_page(request: Request):
     return _page(request, "admin_server.html")
+
+
+@app.get("/pricing", response_class=HTMLResponse)
+def pricing_page(request: Request):
+    return _page(request, "pricing.html")
 
 
 @app.get("/admin/credits", response_class=HTMLResponse)

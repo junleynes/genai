@@ -272,8 +272,9 @@ function renderStudioNav() {
   const items = [['/', 'Explore'], ['/generate', 'Create']];
   if (user) {
     items.push(['/jobs', 'Jobs'], ['/library', 'Library']);
-    if (user.role === 'admin') items.push(['/admin', 'Admin']);
   }
+  items.push(['/pricing', 'Pricing']);
+  if (user && user.role === 'admin') items.push(['/admin', 'Admin']);
   tabs.innerHTML = items.map(([href, label]) => {
     const on = href === '/' ? path === '/' : path.startsWith(href);
     return `<a href="${href}" class="hf-tab${on ? ' active' : ''}"${on ? ' aria-current="page"' : ''}>${label}</a>`;
@@ -285,7 +286,7 @@ function renderStudioNav() {
     const name = user.name || user.email || '';
     const initial = (name.trim()[0] || '?').toUpperCase();
     auth.innerHTML = `
-      <a href="/library" id="hf-credits" class="hf-credits" hidden></a>
+      <a href="/pricing" id="hf-credits" class="hf-credits" hidden></a>
       <a href="/generate" class="hf-btn hf-btn-accent hf-hide-sm">Create</a>
       <div class="hf-user">
         <button type="button" class="hf-avatar" aria-haspopup="true" aria-expanded="false"
@@ -297,6 +298,7 @@ function renderStudioNav() {
           </div>
           <a role="menuitem" href="/library">Library</a>
           <a role="menuitem" href="/jobs">My jobs</a>
+          <a role="menuitem" href="/pricing">Credits &amp; pricing</a>
           <button role="menuitem" type="button" onclick="logout()">Log out</button>
         </div>
       </div>`;

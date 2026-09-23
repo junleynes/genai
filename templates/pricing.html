@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}Pricing – {{ settings.app_name }}{% endblock %}
+{% block content %}
+<div class="hf-wrap pr-page">
+  <header class="pr-head">
+    <span class="hf-eyebrow"><span class="hf-dot"></span> Credits</span>
+    <h1 class="hf-display pr-title">Pay for what <span class="hf-accent-word">you make</span></h1>
+    <p class="pr-lede">Every generation spends credits. Bigger frames and longer clips cost more;
+      failed and cancelled jobs are refunded automatically.</p>
+    <div id="pr-balance" class="pr-balance" hidden></div>
+    <p id="pr-off" class="pr-off" hidden>Credits aren’t switched on yet — generating is free for now.</p>
+  </header>
+
+  <section aria-labelledby="pr-packs-h">
+    <h2 id="pr-packs-h" class="sr-only">Credit packs</h2>
+    <div id="pr-packs" class="pr-packs"><p class="hf-muted">Loading…</p></div>
+    <p id="pr-bonus" class="pr-bonus" hidden></p>
+  </section>
+
+  <section id="pr-mine" class="pr-block" hidden aria-labelledby="pr-mine-h">
+    <h2 id="pr-mine-h" class="hf-h2">Your requests</h2>
+    <div id="pr-mine-list" class="pr-requests"></div>
+  </section>
+
+  <section class="pr-block" aria-labelledby="pr-costs-h">
+    <div class="pr-block-head">
+      <div>
+        <h2 id="pr-costs-h" class="hf-h2">What things cost</h2>
+        <p id="pr-formula" class="hf-muted"></p>
+      </div>
+      <div id="pr-tiers" class="pr-tiers"></div>
+    </div>
+    <div class="pr-table-wrap">
+      <table class="pr-table">
+        <thead><tr>
+          <th scope="col">Tool</th>
+          <th scope="col" class="num">Base</th>
+          <th scope="col" class="num">720p · 5 s</th>
+          <th scope="col" class="num">1080p · 10 s</th>
+        </tr></thead>
+        <tbody id="pr-cost-rows"></tbody>
+      </table>
+    </div>
+    <p class="pr-foot hf-muted">Images are priced per image, by resolution only. The exact cost is shown on the Create button before you generate.</p>
+  </section>
+</div>
+
+<dialog id="pr-dialog" class="pr-dialog" aria-labelledby="pr-dialog-h">
+  <form id="pr-form" method="dialog">
+    <h2 id="pr-dialog-h">Request credits</h2>
+    <div id="pr-dialog-pack" class="pr-dialog-pack"></div>
+    <p id="pr-dialog-note" class="pr-dialog-note"></p>
+    <fieldset id="pr-target" class="pr-target" hidden>
+      <legend>Add the credits to</legend>
+      <label><input type="radio" name="target" value="user" checked /> <span>My personal balance</span></label>
+      <label><input type="radio" name="target" value="group" /> <span id="pr-target-group">Group pool</span></label>
+    </fieldset>
+    <label class="pr-field"><span>Payment reference <small>(optional)</small></span>
+      <input name="reference" maxlength="120" autocomplete="off" placeholder="e.g. transaction or invoice number" /></label>
+    <label class="pr-field"><span>Note for the admin <small>(optional)</small></span>
+      <textarea name="note" rows="2" maxlength="500"></textarea></label>
+    <div class="pr-dialog-actions">
+      <button type="button" class="hf-btn hf-btn-ghost" value="cancel" id="pr-dialog-cancel">Cancel</button>
+      <button type="submit" class="hf-btn hf-btn-accent" id="pr-dialog-submit">Send request</button>
+    </div>
+  </form>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let P = null, ME = null, PICK = null;
+const $ = (id) => document.getElementById(id);
+const num = (n) => Number(n || 0).toLocaleString();
+
+function money(v, cur) {
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur,
+      maximumFractionDigits: Number.isInteger(Number(v)) ? 0 : 2 }).format(v);
+  } catch (_) { return `${cur} ${num(v)}`; }
+}
+function perCredit(p, cur) {
+  const each = p.price / p.credits;
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur,
+      maximumFractionDigits: each < 1 ? 3 : 2 }).format(each);
+  } catch (_) { return `${cur} ${each.toFixed(2)}`; }
+}
+
+// Same formula as app/credits.py
+function costFor(t, tierLabel, seconds) {
+  if (!t.cost) return 0;
+  const m = P.resolution_tiers.find(x => x.label === tierLabel)?.multiplier || 1;
+  const d = t.image ? 1 : Math.max(1, seconds / P.duration_unit_seconds);
+  return Math.max(1, Math.ceil(t.cost * m * d - 1e-9));
+}
+
+function renderPacks() {
+  const best = Math.min(...P.packs.map(p => p.credits ? p.price / p.credits : Infinity));
+  $('pr-packs').innerHTML = P.packs.length ? P.packs.map(p => {
+    const cheapest = P.packs.length > 1 && p.price > 0 && p.price / p.credits === best;
+    return `<article class="pr-pack${p.popular ? ' is-popular' : ''}">
+      ${p.popular ? '<span class="pr-pack-flag">Most popular</span>' : ''}
+      <h3>${escapeHtml(p.name)}</h3>
+      ${p.desc ? `<p class="pr-pack-desc">${escapeHtml(p.desc)}</p>` : ''}
+      <p class="pr-pack-credits"><b>${num(p.credits)}</b> credits</p>
+      <p class="pr-pack-price">${p.price > 0 ? money(p.price, P.currency) : 'Free'}</p>
+      <p class="pr-pack-each">${p.price > 0 ? `${perCredit(p, P.currency)} per credit${cheapest ? ' · <b>best value</b>' : ''}` : '&nbsp;'}</p>
+      <button type="button" class="hf-btn ${p.popular ? 'hf-btn-accent' : 'hf-btn-outline'} pr-pack-btn" data-pack="${escapeHtml(p.id)}">Request ${escapeHtml(p.name)}</button>
+    </article>`;
+  }).join('') : '<p class="hf-muted">No credit packs are on offer right now. Ask an admin for credits.</p>';
+}
+
+function renderCosts() {
+  const unit = P.duration_unit_seconds;
+  const tiers = P.resolution_tiers;
+  $('pr-formula').textContent =
+    `Cost = the tool’s base × resolution × length (length ÷ ${unit} s, never below ×1), rounded up.`;
+  $('pr-tiers').innerHTML = tiers.map(t => `<span><b>×${t.multiplier}</b> ${escapeHtml(t.label)}</span>`).join('');
+  const byCat = P.categories.map(c => [c, P.tools.filter(t => t.cat === c.id)]);
+  $('pr-cost-rows').innerHTML = byCat.map(([c, tools]) => `
+    <tr class="pr-cat"><th colspan="4" scope="colgroup">${escapeHtml(c.name)}</th></tr>
+    ${tools.map(t => {
+      const soon = t.status === 'coming_soon';
+      const cell = (v) => v === 0 ? '<span class="pr-free">Free</span>' : num(v);
+      return `<tr class="${soon ? 'is-soon' : ''}">
+        <th scope="row">${escapeHtml(t.name)}${soon ? ' <small>coming soon</small>' : ''}</th>
+        <td class="num">${cell(t.cost)}</td>
+        <td class="num">${cell(costFor(t, '720p', 5))}</td>
+        <td class="num">${t.image ? '<span class="hf-muted" title="Images are priced by resolution only">' + cell(costFor(t, '1080p', 0)) + '</span>' : cell(costFor(t, '1080p', 10))}</td>
+      </tr>`;
+    }).join('')}`).join('');
+}
+
+const STATUS = { pending: 'Waiting for review', approved: 'Added', rejected: 'Declined', cancelled: 'Cancelled' };
+async function loadMine() {
+  if (!isLoggedIn()) return;
+  try {
+    const rows = await API.get('/api/me/credit-requests');
+    $('pr-mine').hidden = !rows.length;
+    $('pr-mine-list').innerHTML = rows.map(r => `<div class="pr-req">
+      <div>
+        <b>${escapeHtml(r.pack_name)}</b> · ${num(r.credits)} credits · ${money(r.price, r.currency)}
+        <small>${new Date(r.created_at).toLocaleString()}${r.target === 'group' ? ' · to group pool' : ''}${r.reference ? ' · ref ' + escapeHtml(r.reference) : ''}</small>
+        ${r.reason ? `<small>“${escapeHtml(r.reason)}”</small>` : ''}
+      </div>
+      <span class="pr-status is-${r.status}">${STATUS[r.status] || r.status}</span>
+      ${r.status === 'pending' ? `<button type="button" class="cr-link" data-cancel="${r.id}">Cancel</button>` : '<span></span>'}
+    </div>`).join('');
+  } catch (_) { /* not critical */ }
+}
+
+async function loadBalance() {
+  if (!isLoggedIn()) return;
+  const c = await window.refreshCreditPill?.() || await API.get('/api/me/credits').catch(() => null);
+  if (!c) return;
+  ME = c;
+  if (!c.enabled) return;
+  const el = $('pr-balance');
+  el.hidden = false;
+  el.innerHTML = c.exempt
+    ? `<span>You generate for free as an admin.</span>`
+    : `<span>You have <b>${num(c.available)}</b> credits</span>` +
+      (c.group ? `<small>${num(c.personal)} personal + ${num(c.group.credits)} from ${escapeHtml(c.group.name)}</small>` : '');
+}
+
+function openPack(id) {
+  if (!isLoggedIn()) {
+    if (document.getElementById('register-modal')) openRegisterModal('/pricing');
+    else location.href = '/?register=1&next=' + encodeURIComponent('/pricing');
+    return;
+  }
+  PICK = P.packs.find(p => p.id === id);
+  if (!PICK) return;
+  $('pr-dialog-pack').innerHTML = `<b>${escapeHtml(PICK.name)}</b><span>${num(PICK.credits)} credits</span><span>${PICK.price > 0 ? money(PICK.price, P.currency) : 'Free'}</span>`;
+  $('pr-dialog-note').textContent = P.purchase_note || '';
+  $('pr-dialog-note').hidden = !P.purchase_note;
+  const g = ME && ME.group;
+  $('pr-target').hidden = !g;
+  if (g) $('pr-target-group').textContent = `${g.name} pool (shared)`;
+  $('pr-form').reset();
+  $('pr-dialog').showModal();
+}
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-pack]');
+  if (b) return openPack(b.dataset.pack);
+  const c = e.target.closest('[data-cancel]');
+  if (c) {
+    if (!confirm('Cancel this request?')) return;
+    try { await API.post(`/api/credits/requests/${c.dataset.cancel}/cancel`, {}); toast('Request cancelled', 'success'); loadMine(); }
+    catch (err) { toast(err.message, 'error'); }
+  }
+});
+$('pr-dialog-cancel').addEventListener('click', () => $('pr-dialog').close());
+$('pr-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const btn = $('pr-dialog-submit');
+  btn.disabled = true;
+  try {
+    await API.post('/api/credits/requests', {
+      pack_id: PICK.id, target: fd.get('target') || 'user',
+      reference: fd.get('reference') || '', note: fd.get('note') || '',
+    });
+    $('pr-dialog').close();
+    toast('Request sent — an admin will add your credits once payment is confirmed', 'success');
+    loadMine();
+  } catch (err) { toast(err.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
+(async function init() {
+  try { P = await API.get('/api/pricing'); }
+  catch (e) { $('pr-packs').innerHTML = `<p class="text-red-500">${escapeHtml(e.message)}</p>`; return; }
+  $('pr-off').hidden = P.enabled;
+  if (P.signup_bonus > 0 && !isLoggedIn()) {
+    $('pr-bonus').hidden = false;
+    $('pr-bonus').innerHTML = `New accounts start with <b>${num(P.signup_bonus)}</b> free credits.`;
+  }
+  renderPacks();
+  renderCosts();
+  loadBalance();
+  loadMine();
+})();
+</script>
+{% endblock %}

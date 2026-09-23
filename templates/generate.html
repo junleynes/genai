@@ -905,9 +905,14 @@ function refreshCost() {
       note.classList.toggle('is-short', !COST_OK);
       note.textContent = !charged ? ''
         : COST_OK ? `${q.available.toLocaleString()} available`
-        : `Needs ${q.cost.toLocaleString()}, you have ${q.available.toLocaleString()}`;
+        : `Needs ${q.cost.toLocaleString()}, you have ${q.available.toLocaleString()} · `;
+      if (charged && !COST_OK) {
+        const a = document.createElement('a');
+        a.href = '/pricing'; a.textContent = 'Get credits'; a.className = 'hf-cost-link';
+        note.appendChild(a);
+      }
       btn.disabled = !COST_OK;
-      btn.title = COST_OK ? '' : 'Not enough credits — ask an admin for more';
+      btn.title = COST_OK ? '' : 'Not enough credits — get more on the Pricing page';
     } catch (_) {
       if (tag) tag.textContent = '';
       if (note) note.textContent = '';
