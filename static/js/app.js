@@ -149,7 +149,9 @@ function logout() {
 function requireAuth() {
   if (!isLoggedIn()) {
     // Login only exists as a popup on the landing page.
-    window.location.href = '/?login=1&next=' + encodeURIComponent(location.pathname);
+    // Keep the query string too, so e.g. a prompt typed on the landing page
+    // (/generate?type=t2v&prompt=…) survives the login round-trip.
+    window.location.href = '/?login=1&next=' + encodeURIComponent(location.pathname + location.search);
     return false;
   }
   return true;
@@ -290,6 +292,8 @@ function toast(msg, type = 'info') {
   if (!el) {
     el = document.createElement('div');
     el.id = 'toast';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
     el.className = 'fixed bottom-6 right-6 z-[100] max-w-sm px-4 py-3 rounded-xl shadow-xl text-sm font-medium transition-all duration-300 translate-y-4 opacity-0';
     document.body.appendChild(el);
   }
@@ -331,20 +335,19 @@ function isLandingPage() {
   return p === '/';
 }
 
+// Landing + Generate use the top-nav "studio" shell; everything else keeps the
+// sidebar. The <html> class is set before first paint in base.html.
+function isStudioPage() {
+  return document.documentElement.classList.contains('studio');
+}
+
 function applyLayoutMode() {
-  const landing = isLandingPage();
-  document.body.classList.toggle('is-landing', landing);
-  document.documentElement.classList.remove('landing-pending');
+  const studio = isStudioPage();
+  document.body.classList.toggle('is-landing', isLandingPage());
   const main = document.getElementById('main-column');
-  if (main) {
-    if (landing) {
-      main.classList.remove('md:pl-64');
-    } else {
-      main.classList.add('md:pl-64');
-    }
-  }
+  if (main) main.classList.toggle('md:pl-64', !studio);
   const sidebar = document.getElementById('sidebar');
-  if (landing) {
+  if (studio) {
     sidebar?.classList.add('hidden');
     sidebar?.classList.remove('flex');
   } else if (window.matchMedia('(min-width: 768px)').matches) {
@@ -353,18 +356,69 @@ function applyLayoutMode() {
   }
 }
 
+function renderStudioNav() {
+  const tabs = document.getElementById('studio-nav-tabs');
+  const auth = document.getElementById('studio-nav-auth');
+  if (!tabs || !auth) return;
+  const user = getUser();
+  const path = (location.pathname || '/').replace(/\/$/, '') || '/';
+  const items = [['/', 'Explore'], ['/generate', 'Create']];
+  if (user) {
+    items.push(['/jobs', 'Jobs'], ['/library', 'Library']);
+    if (user.role === 'admin') items.push(['/admin', 'Admin']);
+  }
+  tabs.innerHTML = items.map(([href, label]) => {
+    const on = href === '/' ? path === '/' : path.startsWith(href);
+    return `<a href="${href}" class="hf-tab${on ? ' active' : ''}"${on ? ' aria-current="page"' : ''}>${label}</a>`;
+  }).join('');
+
+  if (user) {
+    const name = user.name || user.email || '';
+    const initial = (name.trim()[0] || '?').toUpperCase();
+    auth.innerHTML = `
+      <a href="/generate" class="hf-btn hf-btn-accent hf-hide-sm">Create</a>
+      <div class="hf-user">
+        <button type="button" class="hf-avatar" aria-haspopup="true" aria-expanded="false"
+          title="${escapeHtml(name)}">${escapeHtml(initial)}</button>
+        <div class="hf-menu" role="menu" hidden>
+          <div class="hf-menu-head">
+            <p class="hf-menu-name">${escapeHtml(name)}</p>
+            <p class="hf-menu-sub">${escapeHtml(user.email || '')} · ${escapeHtml(user.role || '')}</p>
+          </div>
+          <a role="menuitem" href="/library">Library</a>
+          <a role="menuitem" href="/jobs">My jobs</a>
+          <button role="menuitem" type="button" onclick="logout()">Log out</button>
+        </div>
+      </div>`;
+    const btn = auth.querySelector('.hf-avatar');
+    const menu = auth.querySelector('.hf-menu');
+    const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu.hidden = !menu.hidden;
+      btn.setAttribute('aria-expanded', String(!menu.hidden));
+    });
+    document.addEventListener('click', (e) => { if (!auth.contains(e.target)) close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  } else {
+    auth.innerHTML = `
+      <button type="button" class="hf-btn hf-btn-ghost" onclick="openLoginModal()">Log in</button>
+      <button type="button" class="hf-btn hf-btn-accent" onclick="openRegisterModal()">Sign up</button>`;
+  }
+}
+
 function initSidebarMobile() {
   const sidebar = document.getElementById('sidebar');
   const overlay = document.getElementById('sidebar-overlay');
   const openBtn = document.getElementById('mobile-menu-btn');
   const open = () => {
-    if (isLandingPage()) return;
+    if (isStudioPage()) return;
     sidebar?.classList.remove('hidden');
     sidebar?.classList.add('flex');
     overlay?.classList.remove('hidden');
   };
   const close = () => {
-    if (window.matchMedia('(min-width: 768px)').matches && !isLandingPage()) return;
+    if (window.matchMedia('(min-width: 768px)').matches && !isStudioPage()) return;
     sidebar?.classList.add('hidden');
     sidebar?.classList.remove('flex');
     overlay?.classList.add('hidden');
@@ -378,6 +432,7 @@ document.addEventListener('DOMContentLoaded', () => {
   applyLayoutMode();
   document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
   renderNav();
+  renderStudioNav();
   initSidebarMobile();
   initLoginModal();
   initRegisterModal();

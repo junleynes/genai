@@ -82,6 +82,64 @@ app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
 
+# ─── Template helpers ─────────────────────────────────────────────────────────
+
+def _hex_rgb(value: str) -> tuple[float, float, float]:
+    h = (value or "").strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    try:
+        return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
+    except (ValueError, IndexError):
+        return (0.39, 0.40, 0.95)  # indigo fallback for a malformed setting
+
+
+def _luminance(rgb: tuple[float, float, float]) -> float:
+    def ch(c: float) -> float:
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (ch(c) for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _contrast(a: float, b: float) -> float:
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def brand_ink(value: str) -> str:
+    """Text colour that stays readable on a solid brand-colour fill. A light
+    brand (lime, yellow) needs near-black text; a dark one needs white."""
+    lum = _luminance(_hex_rgb(value))
+    return "#0a0a0b" if _contrast(lum, 0.0) >= _contrast(lum, 1.0) else "#ffffff"
+
+
+def brand_text(value: str) -> str:
+    """Brand colour usable as *text* on a light surface. Light brands fail
+    contrast on white, so darken them until they reach WCAG AA (4.5:1)."""
+    r, g, b = _hex_rgb(value)
+    for _ in range(40):
+        if _contrast(_luminance((r, g, b)), 1.0) >= 4.5:
+            break
+        r, g, b = r * 0.93, g * 0.93, b * 0.93
+    return "#{:02x}{:02x}{:02x}".format(round(r * 255), round(g * 255), round(b * 255))
+
+
+def asset(path: str) -> str:
+    """Static URL with the file's mtime as a version, so replacing a file
+    (e.g. a card image) is picked up by every page without a hard refresh."""
+    rel = path.lstrip("/").removeprefix("static/")
+    try:
+        v = int((BASE / "static" / rel).stat().st_mtime)
+    except OSError:
+        return f"/static/{rel}"
+    return f"/static/{rel}?v={v}"
+
+
+templates.env.filters["brand_ink"] = brand_ink
+templates.env.filters["brand_text"] = brand_text
+templates.env.globals["asset"] = asset
+
+
 
 @app.get("/api/version")
 def api_version():

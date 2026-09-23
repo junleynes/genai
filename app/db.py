@@ -42,8 +42,8 @@ DEFAULT_SETTINGS = {
     "footer": "© 2026 Opensource Generative AI. Powered by Wan2GP.",
     "logo_url": "",
     "favicon_url": "",
-    "primary_color": "#6366f1",
-    "secondary_color": "#8b5cf6",
+    "primary_color": "#d1fe17",   # electric lime (Higgsfield-style); editable in Admin → Branding
+    "secondary_color": "#a3e635",
     "accent_color": "#22d3ee",
     "default_theme": "system",
     "wan2gp_url": "http://localhost:7860",

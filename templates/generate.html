@@ -1,522 +1,343 @@
 {% extends "base.html" %}
+{% from "partials/tools.html" import TOOLS, CATEGORIES %}
 {% block title %}Generate – {{ settings.app_name }}{% endblock %}
 {% block content %}
-<div class="max-w-6xl mx-auto px-4 py-10">
-  <div class="mb-8">
-    <h1 class="text-3xl font-bold tracking-tight">Create</h1>
-    <p id="page-sub" class="text-slate-500 dark:text-slate-400 mt-1">Pick what you want to make.</p>
-  </div>
+<div class="hf-studio">
 
-  <div id="type-tabs" role="radiogroup" aria-label="Generation type">
-    <button type="button" data-type="t2v" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Text → Video" aria-label="Text to Video. Generate videos from text prompts">
-      <img class="type-art" src="/static/img/cards/t2v.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-    <button type="button" data-type="i2v" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Image → Video" aria-label="Image to Video. Animate still images into videos">
-      <img class="type-art" src="/static/img/cards/i2v.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-    <button type="button" data-type="ia2v" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Image + Audio → Video" aria-label="Image plus Audio to Video. Combine audio and images to create videos">
-      <img class="type-art" src="/static/img/cards/ia2v.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-    <button type="button" data-type="v2v" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Video → Video" aria-label="Video to Video. Restyle and transform existing footage">
-      <img class="type-art" src="/static/img/cards/v2v.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-    <button type="button" data-type="p2v" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Pose Driven → Video" aria-label="Pose Driven to Video. Animate characters using pose data">
-      <img class="type-art" src="/static/img/cards/p2v.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-    <button type="button" data-type="fs" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Face Swap → Video" aria-label="Face Swap to Video. Put someone else's face onto a source video">
-      <img class="type-art" src="/static/img/cards/fs.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-    <button type="button" data-type="msr" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Multi-Subject Reference → Video" aria-label="Multi-Subject Reference to Video. Build a video scene from 2 to 5 reference images">
-      <img class="type-art" src="/static/img/cards/msr.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-    <button type="button" data-type="t2i" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Text → Image" aria-label="Text to Image. Generate images from text descriptions">
-      <img class="type-art" src="/static/img/cards/t2i.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-    <button type="button" data-type="i2i" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Image → Image" aria-label="Image to Image. Transform images with new styles and variations">
-      <img class="type-art" src="/static/img/cards/i2i.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-    <button type="button" data-type="cs" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Character Sheet" aria-label="Character Sheet. Generate a multi-view reference sheet of one character">
-      <img class="type-art" src="/static/img/cards/cs.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-    <button type="button" data-type="ingredients" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Ingredients → Video" aria-label="Ingredients to Video. Animate a reference sheet of characters props and location">
-      <img class="type-art" src="/static/img/cards/ingredients.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
+  <!-- Step 1: pick a tool -->
+  <div id="picker">
+    <div class="hf-picker-head">
+      <div>
+        <h1 class="hf-display">Create</h1>
+        <p id="page-sub">Pick what you want to make.</p>
+      </div>
+      <div class="hf-chips" role="group" aria-label="Filter tools">
+        <button type="button" class="hf-chip" data-filter="all" aria-pressed="true">All<span class="hf-chip-count">{{ TOOLS|length }}</span></button>
+        {%- for c in CATEGORIES %}
+        <button type="button" class="hf-chip" data-filter="{{ c.id }}" aria-pressed="false">{{ c.name }}<span class="hf-chip-count">{{ TOOLS|selectattr('cat', 'equalto', c.id)|list|length }}</span></button>
+        {%- endfor %}
+      </div>
+    </div>
 
-    <button type="button" data-type="outpaint" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="In / Outpaint → Video" aria-label="Video inpainting and outpainting with LTX IC-LoRA">
-      <img class="type-art" src="/static/img/cards/outpaint.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="cleanplate" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Clean Plate → Video" aria-label="Remove people or objects to create an empty background plate">
-      <img class="type-art" src="/static/img/cards/cleanplate.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="relight" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Relight → Video" aria-label="Change the lighting of an existing video">
-      <img class="type-art" src="/static/img/cards/relight.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="daynight" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Day → Night" aria-label="Relight daytime footage into night">
-      <img class="type-art" src="/static/img/cards/daynight.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="colorize" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Colorize → Video" aria-label="Colorize black and white video">
-      <img class="type-art" src="/static/img/cards/colorize.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="upscale" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Upscale → Video" aria-label="Generative 2x or 4x video upscale">
-      <img class="type-art" src="/static/img/cards/upscale.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="foley" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Foley → Audio" aria-label="Generate synchronized foley sound effects from silent video">
-      <img class="type-art" src="/static/img/cards/foley.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="water" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Water Simulation → Video" aria-label="Add water to a clip: rain, surf, rivers, floods and splashes">
-      <img class="type-art" src="/static/img/cards/water.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="deblur" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Deblur → Video" aria-label="Restore sharp focus to blurry or defocused footage">
-      <img class="type-art" src="/static/img/cards/deblur.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="decompress" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Decompress → Video" aria-label="Remove compression artifacts: macroblocking, banding and ringing">
-      <img class="type-art" src="/static/img/cards/decompress.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="crosseyed" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Cross-Eyed → Video" aria-label="Turn a subject's eyes inward in a close-up portrait video">
-      <img class="type-art" src="/static/img/cards/crosseyed.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="shave" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Instant Shave → Video" aria-label="Remove beards and facial hair while keeping identity and motion">
-      <img class="type-art" src="/static/img/cards/shave.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-
-    <button type="button" data-type="cinemagraph" role="radio" aria-checked="false" tabindex="0"
-      class="type-card" data-label="Cinemagraph" aria-label="Turn a still image into a looping cinemagraph with selective motion">
-      <img class="type-art" src="/static/img/cards/cinemagraph.jpg" alt="" aria-hidden="true"
-           width="900" height="604" loading="lazy" decoding="async" />
-      <span class="type-check" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </span>
-    </button>
-  </div>
-
-  <div id="selected-bar" hidden>
-    <button type="button" id="change-type" class="change-type-btn">
-      <span class="change-back" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-      </span>
-      <img id="selected-art" src="" alt="" aria-hidden="true" />
-      <span class="change-copy">
-        <span id="selected-title" class="change-title"></span>
-        <span class="change-hint">Change type</span>
-      </span>
-    </button>
-  </div>
-
-  <div id="step-two" hidden>
-  <div class="flex items-center gap-3 mb-8">
-    <span class="text-sm font-medium text-slate-600 dark:text-slate-400">Mode</span>
-    <div class="inline-flex p-1 rounded-xl bg-slate-200/80 dark:bg-slate-800">
-      <button type="button" id="mode-easy" class="mode-btn active px-4 py-1.5 rounded-lg text-sm font-medium transition">Easy</button>
-      <button type="button" id="mode-advanced" class="mode-btn px-4 py-1.5 rounded-lg text-sm font-medium transition">Advanced</button>
+    <div id="type-tabs" class="hf-tile-grid" role="radiogroup" aria-label="Generation type">
+      {%- for t in TOOLS %}
+      <button type="button" data-type="{{ t.id }}" data-cat="{{ t.cat }}" role="radio" aria-checked="false" tabindex="0"
+        class="type-card hf-tile" data-label="{{ t.label }}" aria-label="{{ t.name }}. {{ t.desc }}">
+        <span class="hf-tile-media">
+          <img class="type-art" src="{{ asset('img/cards/' ~ t.id ~ '.jpg') }}" alt="" aria-hidden="true"
+               width="900" height="604" loading="lazy" decoding="async" />
+          {%- if t.new %}<span class="hf-tile-badges"><span class="hf-new">New</span></span>{% endif %}
+          <span class="type-check" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                 stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          </span>
+        </span>
+        <span class="hf-tile-cap">
+          <span class="hf-tile-name">{{ t.name }}</span>
+          <span class="hf-tile-desc">{{ t.desc }}</span>
+        </span>
+      </button>
+      {%- endfor %}
     </div>
   </div>
 
-  <form id="gen-form" class="space-y-6 p-6 sm:p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-lg" enctype="multipart/form-data">
+  <!-- Chosen tool (replaces the picker once a type is selected) -->
+  <div id="selected-bar" hidden>
+    <div class="hf-toolbar">
+      <button type="button" id="change-type" class="change-type-btn">
+        <span class="change-back" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </span>
+        <img id="selected-art" src="" alt="" aria-hidden="true" />
+        <span class="change-copy">
+          <span id="selected-title" class="change-title"></span>
+          <span class="change-hint">Change tool</span>
+        </span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Step 2: studio workspace -->
+  <div id="step-two" hidden>
+  <form id="gen-form" class="hf-form hf-workspace" enctype="multipart/form-data">
     <input type="hidden" name="job_type" id="job_type" value="t2v" />
     <input type="hidden" name="mode" id="mode" value="easy" />
 
-    <div class="adv-only">
-      <label class="block text-sm font-medium mb-1.5">Model family</label>
-      <select id="model-family" class="w-full mb-3 px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm">
-        <option value="">All families</option>
-      </select>
-      <label class="block text-sm font-medium mb-1.5">Model</label>
-      <select name="model" id="model-select" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm">
-        <option value="auto">Auto (server default)</option>
-      </select>
-      <p id="model-hint" class="text-xs text-slate-400 mt-1">Models filtered for this mode via MCP wangp_list_models.</p>
-    </div>
-
-    <p id="easy-model-note" class="text-xs text-slate-400 hidden">
-      Model and LoRAs are chosen automatically for this mode. Switch to Advanced to override.
-    </p>
-
-
-    <div id="media-panel" class="grid sm:grid-cols-2 gap-4 hidden">
-      <div id="control-wrap" class="hidden">
-        <label class="block text-sm font-medium mb-1.5">Driving video (motion source)</label>
-        <input type="file" name="control_video" id="control-video-input" accept="video/mp4,video/webm,video/quicktime"
-          class="w-full text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-slate-200 dark:file:bg-slate-800 file:text-sm" />
-        <p class="text-xs text-slate-400 mt-1">
-          Its motion is extracted and applied to your generation; its appearance is discarded.
-        </p>
-        <button type="button" id="pick-control-library-btn"
-          class="mt-2 text-xs px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
-          🗂️ Choose from library
-        </button>
-        <div id="control-chip" class="hidden mt-2 flex items-center gap-2 p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900">
-          <span class="text-lg">🎞️</span>
-          <div class="flex-1 min-w-0">
-            <p id="control-chip-title" class="text-xs font-medium truncate"></p>
-            <p class="text-[10px] text-slate-500">Driving video from library</p>
-          </div>
-          <button type="button" onclick="clearControlSeed()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
-        </div>
-
-        <div class="mt-4">
-          <label class="block text-sm font-medium mb-1.5">What to follow</label>
-          <select name="control_type" id="control-type" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm">
-            <option value="pose">Pose — body / limb positions (best for people)</option>
-            <option value="depth">Depth — 3D structure and camera move</option>
-            <option value="canny">Edges — outlines and composition</option>
-            <option value="flow">Motion flow — raw movement</option>
-            <option value="gray">Grayscale — luminance only</option>
-            <option value="raw">Raw video — no preprocessing</option>
-          </select>
-          <p class="text-xs text-slate-400 mt-1" id="control-type-hint">
-            Pose transfers a performance onto your subject without copying their appearance.
-          </p>
-        </div>
-
-        <div class="mt-4 adv-only">
-          <label class="block text-sm font-medium mb-1.5">
-            Control strength <span id="control-strength-val" class="text-slate-400 font-normal">0.9</span>
-          </label>
-          <input type="range" name="control_strength" id="control-strength"
-                 min="0.1" max="1.5" step="0.05" value="0.9" class="w-full" />
-          <p class="text-xs text-slate-400 mt-1">
-            Higher follows the driving motion more strictly; lower gives the model more freedom.
-          </p>
+    <aside class="hf-rail" aria-label="Settings">
+      <div>
+        <p class="hf-rail-title mb-2">Mode</p>
+        <div class="hf-mode" role="group" aria-label="Mode">
+          <button type="button" id="mode-easy" class="mode-btn active">Easy</button>
+          <button type="button" id="mode-advanced" class="mode-btn">Advanced</button>
         </div>
       </div>
 
       <div class="adv-only">
-        <label class="block text-sm font-medium mb-1.5">LoRAs (optional)</label>
-        <div id="lora-picker" class="hidden space-y-1.5 max-h-52 overflow-y-auto p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"></div>
-        <p id="lora-status" class="text-xs text-slate-400 mt-1">Select a model to see its LoRAs.</p>
-        <div id="lora-manual-wrap" class="hidden">
-          <textarea name="loras" id="loras-input" rows="2" placeholder="lora-file-name.safetensors:1.0, other-lora.safetensors:0.8"
-            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-xs"></textarea>
+        <label class="block text-sm font-medium mb-1.5">Model family</label>
+        <select id="model-family" class="w-full mb-3 px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm">
+          <option value="">All families</option>
+        </select>
+        <label class="block text-sm font-medium mb-1.5">Model</label>
+        <select name="model" id="model-select" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm">
+          <option value="auto">Auto (server default)</option>
+        </select>
+        <p id="model-hint" class="text-xs text-slate-400 mt-1">Models filtered for this mode via MCP wangp_list_models.</p>
+      </div>
+
+      <p id="easy-model-note" class="text-xs text-slate-400 hidden">
+        Model and LoRAs are chosen automatically for this mode. Switch to Advanced to override.
+      </p>
+
+      <div id="media-panel" class="grid sm:grid-cols-2 gap-4 hidden">
+        <div id="control-wrap" class="hidden">
+          <label class="block text-sm font-medium mb-1.5">Driving video (motion source)</label>
+          <input type="file" name="control_video" id="control-video-input" accept="video/mp4,video/webm,video/quicktime"
+            class="w-full text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-slate-200 dark:file:bg-slate-800 file:text-sm" />
           <p class="text-xs text-slate-400 mt-1">
-            <code>filename:weight</code> pairs, comma or newline separated. Weight defaults to 1.0.
-            Filenames must match WanGP's Loras list for the selected model.
+            Its motion is extracted and applied to your generation; its appearance is discarded.
           </p>
-        </div>
-        <input type="hidden" name="loras" id="loras-hidden" disabled />
-      </div>
-
-      <div id="image-wrap" class="hidden">
-        <label class="block text-sm font-medium mb-1.5"><span id="image-label">Image</span> <span id="image-req" class="text-red-500">*</span></label>
-        <input type="file" name="image" id="image-input" accept="image/png,image/jpeg,image/webp,image/jpg"
-          class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
-        <p class="text-xs text-slate-400 mt-1">PNG, JPG, WEBP — reference / start frame</p>
-        <button type="button" id="pick-library-btn"
-          class="mt-2 text-xs px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
-          🗂️ Choose from library
-        </button>
-        <div id="library-chip" class="hidden mt-2 flex items-center gap-2 p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900">
-          <img id="library-chip-img" class="w-10 h-10 rounded object-cover" alt="" />
-          <div class="flex-1 min-w-0">
-            <p id="library-chip-title" class="text-xs font-medium truncate"></p>
-            <p class="text-[10px] text-slate-500">From library</p>
+          <button type="button" id="pick-control-library-btn"
+            class="mt-2 text-xs px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
+            🗂️ Choose from library
+          </button>
+          <div id="control-chip" class="hidden mt-2 flex items-center gap-2 p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900">
+            <span class="text-lg">🎞️</span>
+            <div class="flex-1 min-w-0">
+              <p id="control-chip-title" class="text-xs font-medium truncate"></p>
+              <p class="text-[10px] text-slate-500">Driving video from library</p>
+            </div>
+            <button type="button" onclick="clearControlSeed()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
           </div>
-          <button type="button" onclick="clearLibrarySeed()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">×</button>
+
+          <div class="mt-4">
+            <label class="block text-sm font-medium mb-1.5">What to follow</label>
+            <select name="control_type" id="control-type" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm">
+              <option value="pose">Pose — body / limb positions (best for people)</option>
+              <option value="depth">Depth — 3D structure and camera move</option>
+              <option value="canny">Edges — outlines and composition</option>
+              <option value="flow">Motion flow — raw movement</option>
+              <option value="gray">Grayscale — luminance only</option>
+              <option value="raw">Raw video — no preprocessing</option>
+            </select>
+            <p class="text-xs text-slate-400 mt-1" id="control-type-hint">
+              Pose transfers a performance onto your subject without copying their appearance.
+            </p>
+          </div>
+
+          <div class="mt-4 adv-only">
+            <label class="block text-sm font-medium mb-1.5">
+              Control strength <span id="control-strength-val" class="text-slate-400 font-normal">0.9</span>
+            </label>
+            <input type="range" name="control_strength" id="control-strength"
+                   min="0.1" max="1.5" step="0.05" value="0.9" class="w-full" />
+            <p class="text-xs text-slate-400 mt-1">
+              Higher follows the driving motion more strictly; lower gives the model more freedom.
+            </p>
+          </div>
         </div>
-        <div id="image-preview" class="mt-2 hidden"><img class="max-h-32 rounded-lg border border-slate-200 dark:border-slate-700" alt="preview" /></div>
-      </div>
-      <div id="audio-wrap" class="hidden">
-        <label class="block text-sm font-medium mb-1.5">Audio <span class="text-red-500">*</span></label>
-        <input type="file" name="audio" id="audio-input" accept="audio/mpeg,audio/wav,audio/mp3,audio/ogg,audio/x-wav"
-          class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
-        <p class="text-xs text-slate-400 mt-1">MP3, WAV, OGG — drives motion / lip-sync</p>
-      </div>
-      <div id="video-wrap" class="hidden">
-        <label class="block text-sm font-medium mb-1.5"><span id="video-label">Video</span> <span class="text-red-500">*</span></label>
-        <input type="file" name="video" id="video-input" accept="video/mp4,video/webm,video/quicktime"
-          class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
-        <p class="text-xs text-slate-400 mt-1">MP4, WEBM — source for video-to-video</p>
-      </div>
-      <div id="end-image-wrap" class="hidden">
-        <label class="block text-sm font-medium mb-1.5">End image <span class="text-slate-400">(optional)</span></label>
-        <input type="file" name="end_image" id="end-image-input" accept="image/png,image/jpeg,image/webp"
-          class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
-        <p class="text-xs text-slate-400 mt-1">Target end frame for guided motion</p>
-      </div>
-    </div>
 
-    <div id="refs-wrap" class="hidden">
-      <label class="block text-sm font-medium mb-1.5">
-        Reference images <span class="text-slate-400">(optional — up to 5)</span>
-      </label>
-      <div id="refs-list" class="space-y-2"></div>
-      <div class="flex items-center gap-2 mt-2">
-        <button type="button" onclick="document.getElementById('refs-file-input').click()"
-          class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
-          + Add reference
-        </button>
-        <span id="refs-count" class="text-xs text-slate-400"></span>
+        <div class="adv-only">
+          <label class="block text-sm font-medium mb-1.5">LoRAs (optional)</label>
+          <div id="lora-picker" class="hidden space-y-1.5 max-h-52 overflow-y-auto p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"></div>
+          <p id="lora-status" class="text-xs text-slate-400 mt-1">Select a model to see its LoRAs.</p>
+          <div id="lora-manual-wrap" class="hidden">
+            <textarea name="loras" id="loras-input" rows="2" placeholder="lora-file-name.safetensors:1.0, other-lora.safetensors:0.8"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-xs"></textarea>
+            <p class="text-xs text-slate-400 mt-1">
+              <code>filename:weight</code> pairs, comma or newline separated. Weight defaults to 1.0.
+              Filenames must match WanGP's Loras list for the selected model.
+            </p>
+          </div>
+          <input type="hidden" name="loras" id="loras-hidden" disabled />
+        </div>
+
+        <div id="image-wrap" class="hidden">
+          <label class="block text-sm font-medium mb-1.5"><span id="image-label">Image</span> <span id="image-req" class="text-red-500">*</span></label>
+          <input type="file" name="image" id="image-input" accept="image/png,image/jpeg,image/webp,image/jpg"
+            class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
+          <p class="text-xs text-slate-400 mt-1">PNG, JPG, WEBP — reference / start frame</p>
+          <button type="button" id="pick-library-btn"
+            class="mt-2 text-xs px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
+            🗂️ Choose from library
+          </button>
+          <div id="library-chip" class="hidden mt-2 flex items-center gap-2 p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900">
+            <img id="library-chip-img" class="w-10 h-10 rounded object-cover" alt="" />
+            <div class="flex-1 min-w-0">
+              <p id="library-chip-title" class="text-xs font-medium truncate"></p>
+              <p class="text-[10px] text-slate-500">From library</p>
+            </div>
+            <button type="button" onclick="clearLibrarySeed()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">×</button>
+          </div>
+          <div id="image-preview" class="mt-2 hidden"><img class="max-h-32 rounded-lg border border-slate-200 dark:border-slate-700" alt="preview" /></div>
+        </div>
+        <div id="audio-wrap" class="hidden">
+          <label class="block text-sm font-medium mb-1.5">Audio <span class="text-red-500">*</span></label>
+          <input type="file" name="audio" id="audio-input" accept="audio/mpeg,audio/wav,audio/mp3,audio/ogg,audio/x-wav"
+            class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
+          <p class="text-xs text-slate-400 mt-1">MP3, WAV, OGG — drives motion / lip-sync</p>
+        </div>
+        <div id="video-wrap" class="hidden">
+          <label class="block text-sm font-medium mb-1.5"><span id="video-label">Video</span> <span class="text-red-500">*</span></label>
+          <input type="file" name="video" id="video-input" accept="video/mp4,video/webm,video/quicktime"
+            class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
+          <p class="text-xs text-slate-400 mt-1">MP4, WEBM — source for video-to-video</p>
+        </div>
+        <div id="end-image-wrap" class="hidden">
+          <label class="block text-sm font-medium mb-1.5">End image <span class="text-slate-400">(optional)</span></label>
+          <input type="file" name="end_image" id="end-image-input" accept="image/png,image/jpeg,image/webp"
+            class="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-950 file:font-medium" />
+          <p class="text-xs text-slate-400 mt-1">Target end frame for guided motion</p>
+        </div>
       </div>
-      <input type="file" id="refs-file-input" accept="image/png,image/jpeg,image/webp" multiple class="hidden" />
-      <p class="text-xs text-slate-400 mt-2">
-        <strong>Order matters:</strong> background / setting first, then subjects and objects.
-        Both VACE and LTX-2.3 MSR read the list in that order. Subject and object cutouts
-        work best on a plain white background.
-      </p>
-      <p id="refs-model-note" class="text-xs text-slate-400 mt-1 hidden">
-        Only some models read reference images — VACE, the LTX-2.3 MSR finetune,
-        and edit/identity models. Pick one explicitly in Advanced mode to be sure
-        yours does; plain checkpoints ignore them.
-      </p>
-      <p id="refs-msr-hint" class="text-xs text-amber-600 dark:text-amber-400 mt-1 hidden">
-        Describe each reference in your prompt and say what it provides — e.g.
-        “Image 1 is the studio background, Image 2 is the presenter, Image 3 is the product.”
-        Without those labels identity consistency drops noticeably.
-      </p>
-    </div>
 
-    <div id="sheet-wrap" class="hidden">
-      <label class="block text-sm font-medium mb-1.5">Sheet layout</label>
-      <select name="sheet_layout" id="sheet-layout"
-        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm">
-        <option value="turnaround">Turnaround — front, ¾, side, back</option>
-        <option value="expressions">Expressions — 6 facial expressions</option>
-        <option value="poses">Poses — 4 full-body poses</option>
-        <option value="full">Full sheet — turnaround + expressions</option>
-      </select>
-      <p class="text-xs text-slate-400 mt-1">
-        Describe the character and/or upload a photo of them. Layout, white
-        background and consistency wording are added automatically. Output is a
-        wide sheet on a plain white background, ready for MSR or VACE.
-        <strong class="font-medium text-slate-500 dark:text-slate-300">A reference photo needs an identity/edit model</strong>
-        (Krea Identity, Qwen Image Edit, etc.) — plain Flux / Klein will invent a different person.
-      </p>
-    </div>
+      <div id="refs-wrap" class="hidden">
+        <label class="block text-sm font-medium mb-1.5">
+          Reference images <span class="text-slate-400">(optional — up to 5)</span>
+        </label>
+        <div id="refs-list" class="space-y-2"></div>
+        <div class="flex items-center gap-2 mt-2">
+          <button type="button" onclick="document.getElementById('refs-file-input').click()"
+            class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
+            + Add reference
+          </button>
+          <span id="refs-count" class="text-xs text-slate-400"></span>
+        </div>
+        <input type="file" id="refs-file-input" accept="image/png,image/jpeg,image/webp" multiple class="hidden" />
+        <p class="text-xs text-slate-400 mt-2">
+          <strong>Order matters:</strong> background / setting first, then subjects and objects.
+          Both VACE and LTX-2.3 MSR read the list in that order. Subject and object cutouts
+          work best on a plain white background.
+        </p>
+        <p id="refs-model-note" class="text-xs text-slate-400 mt-1 hidden">
+          Only some models read reference images — VACE, the LTX-2.3 MSR finetune,
+          and edit/identity models. Pick one explicitly in Advanced mode to be sure
+          yours does; plain checkpoints ignore them.
+        </p>
+        <p id="refs-msr-hint" class="text-xs text-amber-600 dark:text-amber-400 mt-1 hidden">
+          Describe each reference in your prompt and say what it provides — e.g.
+          “Image 1 is the studio background, Image 2 is the presenter, Image 3 is the product.”
+          Without those labels identity consistency drops noticeably.
+        </p>
+      </div>
 
-    <div>
-      <label class="block text-sm font-medium mb-1.5">Prompt <span id="prompt-req" class="text-red-500">*</span></label>
-      <textarea name="prompt" id="prompt" rows="4" placeholder="Describe the motion, style, or scene…"
-        class="w-full px-3.5 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 focus:ring-2 focus:ring-brand outline-none transition resize-y"></textarea>
-    </div>
+      <div id="sheet-wrap" class="hidden">
+        <label class="block text-sm font-medium mb-1.5">Sheet layout</label>
+        <select name="sheet_layout" id="sheet-layout"
+          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm">
+          <option value="turnaround">Turnaround — front, ¾, side, back</option>
+          <option value="expressions">Expressions — 6 facial expressions</option>
+          <option value="poses">Poses — 4 full-body poses</option>
+          <option value="full">Full sheet — turnaround + expressions</option>
+        </select>
+        <p class="text-xs text-slate-400 mt-1">
+          Describe the character and/or upload a photo of them. Layout, white
+          background and consistency wording are added automatically. Output is a
+          wide sheet on a plain white background, ready for MSR or VACE.
+          <strong class="font-medium text-slate-500 dark:text-slate-300">A reference photo needs an identity/edit model</strong>
+          (Krea Identity, Qwen Image Edit, etc.) — plain Flux / Klein will invent a different person.
+        </p>
+      </div>
 
-    <div id="neg-wrap" class="hidden">
-      <label class="block text-sm font-medium mb-1.5">Negative prompt</label>
-      <textarea name="negative_prompt" rows="2" placeholder="blurry, low quality, watermark…"
-        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 focus:ring-2 focus:ring-brand outline-none"></textarea>
-    </div>
-
-    <div id="easy-panel" class="grid sm:grid-cols-2 gap-4">
       <div>
-        <label class="block text-sm font-medium mb-1.5">Quality preset</label>
-        <select id="easy-preset" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
-          <option value="fast">Fast (480p, fewer steps)</option>
-          <option value="balanced">Balanced</option>
-          <option value="quality">High quality (720p, more steps)</option>
-          <option value="broadcast">Broadcast (1080p, max steps)</option>
-        </select>
-        <p id="preset-summary" class="text-xs text-slate-400 mt-1.5 font-mono"></p>
+        <p class="hf-rail-title mb-2">Settings</p>
+        <div id="easy-panel" class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium mb-1.5">Quality preset</label>
+            <select id="easy-preset" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
+              <option value="fast">Fast (480p, fewer steps)</option>
+              <option value="balanced">Balanced</option>
+              <option value="quality">High quality (720p, more steps)</option>
+              <option value="broadcast">Broadcast (1080p, max steps)</option>
+            </select>
+            <p id="preset-summary" class="text-xs text-slate-400 mt-1.5 font-mono"></p>
+          </div>
+          <div id="easy-duration-wrap">
+            <label class="block text-sm font-medium mb-1.5">Duration</label>
+            <select id="easy-duration" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
+              <option value="2">~2 seconds</option>
+              <option value="4" selected>~4 seconds</option>
+              <option value="5">~5 seconds</option>
+            </select>
+          </div>
+        </div>
+        <div id="adv-panel" class="hidden space-y-4">
+          <div class="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium mb-1.5">Resolution</label>
+              <select name="resolution" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
+                <optgroup label="Landscape (horizontal)">
+                  <option value="832x480">832×480 (low VRAM)</option>
+                  <option value="1280x704">1280×704</option>
+                  <option value="1280x720">1280×720</option>
+                  <option value="1920x1080">1920×1080 (broadcast)</option>
+                </optgroup>
+                <optgroup label="Portrait (vertical)">
+                  <option value="480x832">480×832 (low VRAM)</option>
+                  <option value="704x1280">704×1280</option>
+                  <option value="720x1280">720×1280</option>
+                  <option value="1080x1920">1080×1920 (broadcast)</option>
+                </optgroup>
+                <optgroup label="Square">
+                  <option value="1024x1024">1024×1024</option>
+                  <option value="1280x1280">1280×1280</option>
+                </optgroup>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1.5">Steps</label>
+              <input type="number" name="steps" value="{{ settings.default_steps or 20 }}" min="1" max="100" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1.5">Guidance scale (CFG)</label>
+              <input type="number" name="guidance_scale" value="{{ settings.default_guidance_scale or 7.5 }}" min="0" max="30" step="0.5" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1.5">Seed (-1 = random)</label>
+              <input type="number" name="seed" value="-1" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+            </div>
+            <div id="adv-duration-wrap">
+              <label class="block text-sm font-medium mb-1.5">Duration (seconds)</label>
+              <input type="number" name="duration_seconds" value="4" min="1" max="30" step="0.5" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1.5">FPS</label>
+              <input type="number" name="fps" value="{{ settings.default_fps or 24 }}" min="8" max="60" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+            </div>
+          </div>
+        </div>
       </div>
-      <div id="easy-duration-wrap">
-        <label class="block text-sm font-medium mb-1.5">Duration</label>
-        <select id="easy-duration" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
-          <option value="2">~2 seconds</option>
-          <option value="4" selected>~4 seconds</option>
-          <option value="5">~5 seconds</option>
-        </select>
-      </div>
-    </div>
+    </aside>
 
-    <div id="adv-panel" class="hidden space-y-4">
-      <div class="grid sm:grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm font-medium mb-1.5">Resolution</label>
-          <select name="resolution" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950">
-            <optgroup label="Landscape (horizontal)">
-              <option value="832x480">832×480 (low VRAM)</option>
-              <option value="1280x704">1280×704</option>
-              <option value="1280x720">1280×720</option>
-              <option value="1920x1080">1920×1080 (broadcast)</option>
-            </optgroup>
-            <optgroup label="Portrait (vertical)">
-              <option value="480x832">480×832 (low VRAM)</option>
-              <option value="704x1280">704×1280</option>
-              <option value="720x1280">720×1280</option>
-              <option value="1080x1920">1080×1920 (broadcast)</option>
-            </optgroup>
-            <optgroup label="Square">
-              <option value="1024x1024">1024×1024</option>
-              <option value="1280x1280">1280×1280</option>
-            </optgroup>
-          </select>
-        </div>
-        <div>
-          <label class="block text-sm font-medium mb-1.5">Steps</label>
-          <input type="number" name="steps" value="{{ settings.default_steps or 20 }}" min="1" max="100" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
-        </div>
-        <div>
-          <label class="block text-sm font-medium mb-1.5">Guidance scale (CFG)</label>
-          <input type="number" name="guidance_scale" value="{{ settings.default_guidance_scale or 7.5 }}" min="0" max="30" step="0.5" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
-        </div>
-        <div>
-          <label class="block text-sm font-medium mb-1.5">Seed (-1 = random)</label>
-          <input type="number" name="seed" value="-1" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
-        </div>
-        <div id="adv-duration-wrap">
-          <label class="block text-sm font-medium mb-1.5">Duration (seconds)</label>
-          <input type="number" name="duration_seconds" value="4" min="1" max="30" step="0.5" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
-        </div>
-        <div>
-          <label class="block text-sm font-medium mb-1.5">FPS</label>
-          <input type="number" name="fps" value="{{ settings.default_fps or 24 }}" min="8" max="60" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+    <section class="hf-main">
+      <div class="hf-composer">
+        <label for="prompt" class="hf-composer-label">Prompt <span id="prompt-req" class="text-red-500">*</span></label>
+        <textarea name="prompt" id="prompt" rows="5" placeholder="Describe the motion, style, or scene…"></textarea>
+        <div class="hf-composer-foot">
+          <span class="hf-muted text-xs hidden sm:inline">Ctrl/⌘ + Enter to generate</span>
+          <button type="submit" id="submit-btn" class="hf-btn hf-btn-accent hf-btn-lg">
+            <svg class="hf-spark" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2Z"/></svg>
+            <span class="submit-label">Generate</span>
+          </button>
         </div>
       </div>
-    </div>
 
-    <div class="flex flex-wrap items-center gap-3 pt-2">
-      <button type="submit" id="submit-btn" class="btn-brand px-6 py-2.5 rounded-xl font-semibold shadow-md disabled:opacity-60">Generate</button>
-      <a href="/jobs" class="text-sm text-slate-500 hover:text-brand transition">View my jobs →</a>
-    </div>
+      <div id="neg-wrap" class="hidden">
+        <label class="block text-sm font-medium mb-1.5">Negative prompt</label>
+        <textarea name="negative_prompt" rows="2" placeholder="blurry, low quality, watermark…"
+          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 focus:ring-2 focus:ring-brand outline-none"></textarea>
+      </div>
+
+      <div>
+        <div class="hf-feed-head">
+          <h2>Recent</h2>
+          <a href="/jobs">All jobs →</a>
+        </div>
+        <div id="recent-feed" class="hf-feed" aria-live="polite"></div>
+      </div>
+    </section>
   </form>
+  </div>
 </div>
 
 <div id="lib-modal" class="hidden fixed inset-0 z-50">
@@ -531,142 +352,6 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<style>
-  /* ── Generation type cards ─────────────────────────────────────────── */
-  /* The artwork carries its own title and description, so the cards add no
-     text overlay — only selection affordances. */
-  #type-tabs {
-    display: grid;
-    grid-template-columns: repeat(1, minmax(0, 1fr));
-    gap: .75rem;
-    margin-bottom: 2rem;
-  }
-  @media (min-width: 560px) { #type-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (min-width: 1000px) { #type-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; } }
-
-  .type-card {
-    position: relative;
-    display: block;
-    width: 100%;
-    padding: 0;
-    border: 1px solid rgba(148,163,184,.22);
-    border-radius: 1rem;
-    overflow: hidden;
-    background: #000;
-    cursor: pointer;
-    line-height: 0;               /* no descender gap under the image */
-    transition: transform .35s cubic-bezier(.2,.8,.2,1),
-                box-shadow .35s ease, border-color .25s ease;
-  }
-  .type-art {
-    display: block;
-    width: 100%;
-    height: auto;
-    aspect-ratio: 1168 / 784;     /* matches the source art, so nothing crops */
-    object-fit: cover;
-    /* Unselected cards sit back a little so the chosen one reads clearly. */
-    opacity: .72;
-    transform: scale(1.005);
-    transition: opacity .3s ease, transform .5s cubic-bezier(.2,.8,.2,1);
-  }
-  .type-card:hover { transform: translateY(-4px); box-shadow: 0 18px 40px -18px rgba(0,0,0,.7); }
-  .type-card:hover .type-art { opacity: 1; transform: scale(1.03); }
-  .type-card:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
-
-  .type-card.active {
-    border-color: transparent;
-    box-shadow: 0 0 0 2px var(--brand), 0 18px 44px -20px var(--brand);
-  }
-  .type-card.active .type-art { opacity: 1; }
-
-  .type-check {
-    position: absolute; top: .625rem; right: .625rem;
-    width: 24px; height: 24px; border-radius: 999px;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--brand); color: #fff;
-    opacity: 0; transform: scale(.6);
-    transition: opacity .2s ease, transform .25s cubic-bezier(.2,1.4,.4,1);
-  }
-  .type-card.active .type-check { opacity: 1; transform: scale(1); }
-
-  /* ── Easy / Advanced toggle ────────────────────────────────────────── */
-  /* The selected pill is raised out of the track; the unselected one is
-     muted. Both states are declared so neither relies on inherited colour. */
-  .mode-btn {
-    color: #64748b;
-    background: transparent;
-    box-shadow: none;
-  }
-  .dark .mode-btn { color: #94a3b8; }
-  .mode-btn:hover { color: #334155; }
-  .dark .mode-btn:hover { color: #cbd5e1; }
-  .mode-btn.active {
-    background: #fff;
-    color: #0f172a;
-    box-shadow: 0 1px 3px rgb(0 0 0 / .1);
-  }
-  .dark .mode-btn.active { background: #1e293b; color: #f1f5f9; }
-  .mode-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-
-  /* ── Selected-type bar (replaces the grid once a type is chosen) ───── */
-  #selected-bar[hidden] { display: none; }
-  #selected-bar { margin-bottom: 1.5rem; animation: revealUp .25s ease both; }
-
-  .change-type-btn {
-    display: flex; align-items: center; gap: .75rem;
-    width: 100%;
-    padding: .5rem .75rem .5rem .5rem;
-    border-radius: .875rem;
-    border: 1px solid rgba(148,163,184,.25);
-    background: #fff;
-    cursor: pointer;
-    text-align: left;
-    transition: border-color .2s ease, background .2s ease;
-  }
-  .dark .change-type-btn { background: #0f172a; }
-  .change-type-btn:hover { border-color: var(--brand); }
-  .change-type-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-
-  .change-back {
-    display: flex; align-items: center; justify-content: center;
-    width: 28px; height: 28px; flex: none;
-    border-radius: 999px;
-    color: #64748b;
-  }
-  .dark .change-back { color: #94a3b8; }
-  .change-type-btn:hover .change-back { color: var(--brand); }
-
-  #selected-art {
-    width: 64px; height: 43px; flex: none;
-    object-fit: cover; border-radius: .5rem;
-    background: #000;
-  }
-  .change-copy { display: flex; flex-direction: column; min-width: 0; }
-  .change-title {
-    font-size: .875rem; font-weight: 650; line-height: 1.2; color: #0f172a;
-  }
-  .dark .change-title { color: #e2e8f0; }
-  .change-hint { font-size: .6875rem; color: #64748b; margin-top: .0625rem; }
-  .dark .change-hint { color: #94a3b8; }
-
-  #type-tabs[hidden] { display: none; }
-
-  /* ── Step reveal ───────────────────────────────────────────────────── */
-  /* Mode toggle and the form stay hidden until a type is chosen. */
-  #step-two[hidden] { display: none; }
-  #step-two { animation: revealUp .3s ease both; }
-  @keyframes revealUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to   { opacity: 1; transform: none; }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .type-card, .type-art, .type-check { transition: none !important; }
-    .type-card:hover { transform: none; }
-    .type-card:hover .type-art { transform: scale(1.005); }
-    #step-two { animation: none; }
-  }
-</style>
 <script>
 // Server-side "Auto" targets, so the dropdown can name the model it will use
 // instead of leaving it opaque.
@@ -1186,7 +871,8 @@ document.querySelectorAll('.type-card').forEach(btn => {
     const keys = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'];
     if (!keys.includes(e.key)) return;
     e.preventDefault();
-    const cards = [...document.querySelectorAll('.type-card')];
+    // Only cards visible under the current category filter.
+    const cards = [...document.querySelectorAll('.type-card')].filter(c => !c.hidden);
     const i = cards.indexOf(btn);
     const step = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1 : -1;
     const next = cards[(i + step + cards.length) % cards.length];
@@ -1210,6 +896,7 @@ function selectType(btn) {
   // The picker has done its job — swap the whole grid for a compact bar
   // naming the choice, so the form gets the full page.
   document.getElementById('type-tabs').hidden = true;
+  document.getElementById('picker').hidden = true;
 
   const bar = document.getElementById('selected-bar');
   const art = document.getElementById('selected-art');
@@ -1225,6 +912,7 @@ function selectType(btn) {
 
   updateUI();
   loadModels();
+  loadRecent();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1235,6 +923,7 @@ function showTypePicker() {
   document.getElementById('selected-bar').hidden = true;
   const grid = document.getElementById('type-tabs');
   grid.hidden = false;
+  document.getElementById('picker').hidden = false;
   const sub = document.getElementById('page-sub');
   if (sub) sub.textContent = 'Pick what you want to make.';
   const active = grid.querySelector('.type-card.active');
@@ -1263,6 +952,13 @@ document.getElementById('change-type')?.addEventListener('click', showTypePicker
       const isVid = mt === 'video' || /\.(mp4|webm|mov)(\?|$)/i.test(url);
       if (isVid) return;
       img.dataset.defaultSrc = img.getAttribute('src');
+      // If the library file is gone or unreachable, fall back to the stock art
+      // instead of showing a broken image.
+      img.addEventListener('error', () => {
+        if (img.dataset.defaultSrc && img.getAttribute('src') !== img.dataset.defaultSrc) {
+          img.setAttribute('src', img.dataset.defaultSrc);
+        }
+      }, { once: true });
       img.setAttribute('src', url);
       img.setAttribute('title', entry.title || entry.prompt || '');
     });
@@ -1297,8 +993,9 @@ document.getElementById('gen-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
   const btn = document.getElementById('submit-btn');
+  const btnLabel = btn.querySelector('.submit-label') || btn;
   btn.disabled = true;
-  btn.textContent = 'Submitting…';
+  btnLabel.textContent = 'Submitting…';
 
   // Must run before FormData is built so the hidden field carries the picks.
   syncLorasHidden();
@@ -1349,12 +1046,17 @@ document.getElementById('gen-form').addEventListener('submit', async (e) => {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : (data.detail?.[0]?.msg || data.message || 'Failed'));
-    toast('Job queued: ' + (data.title || data.prompt || currentType), 'success');
-    setTimeout(() => location.href = '/jobs', 800);
+    // Stay in the studio: the new job appears at the top of Recent and
+    // updates in place, so the prompt can be tweaked and re-run.
+    toast('Queued — watch it in Recent', 'success');
+    btn.disabled = false;
+    btnLabel.textContent = 'Generate';
+    loadRecent();
+    document.getElementById('recent-feed')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (err) {
     toast(err.message || 'Failed to create job', 'error');
     btn.disabled = false;
-    btn.textContent = 'Generate';
+    btnLabel.textContent = 'Generate';
   }
 });
 
@@ -1600,6 +1302,119 @@ function applyReusedJob(data) {
   } catch (_) {}
 })();
 
+
+
+// ─── Studio: category filter, shortcuts, deep links, Recent feed ─────────
+
+(function initCategoryFilter() {
+  const chips = document.querySelectorAll('#picker .hf-chip[data-filter]');
+  const cards = document.querySelectorAll('#type-tabs .type-card');
+  chips.forEach(chip => chip.addEventListener('click', () => {
+    const f = chip.dataset.filter;
+    chips.forEach(c => c.setAttribute('aria-pressed', String(c === chip)));
+    cards.forEach(c => { c.hidden = f !== 'all' && c.dataset.cat !== f; });
+  }));
+})();
+
+// Ctrl/Cmd + Enter in the prompt submits.
+document.getElementById('prompt')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    document.getElementById('gen-form').requestSubmit();
+  }
+});
+
+// Recent generations, newest first. Polls only while something is running
+// and the tab is visible, instead of hammering the API forever.
+let recentTimer = null;
+function recentMedia(j) {
+  const url = j.result_url;
+  if (!url) return '';
+  const isVid = /\.(mp4|webm|mov)(\?|$)/i.test(url);
+  const isAudio = /\.(wav|mp3|ogg|flac|m4a)(\?|$)/i.test(url);
+  if (isAudio) return `<div class="hf-feed-pending"><b>Audio ready</b><audio src="${url}" controls preload="none" style="width:90%"></audio></div>`;
+  return isVid
+    ? `<video src="${url}" muted loop playsinline preload="metadata"></video>`
+    : `<img src="${url}" alt="" loading="lazy" />`;
+}
+function recentCard(j) {
+  const status = j.status || 'queued';
+  const label = escapeHtml(j.title || j.prompt || j.job_type || 'Untitled');
+  const tag = escapeHtml(j.job_type || '');
+  if (status === 'completed' && j.result_url) {
+    return `<a class="hf-feed-item" href="${j.result_url}" target="_blank" rel="noopener" title="${label}">
+      ${recentMedia(j)}
+      <div class="hf-feed-meta"><span>${label}</span><span class="hf-feed-tag">${tag}</span></div></a>`;
+  }
+  const running = status === 'queued' || status === 'processing';
+  const failed = status === 'failed';
+  const pct = Math.max(0, Math.min(100, Number(j.progress) || 0));
+  return `<a class="hf-feed-item ${running ? 'is-running' : ''} ${failed ? 'is-failed' : ''}" href="/jobs" title="${label}">
+    <div class="hf-feed-pending">
+      <b>${running ? (status === 'queued' ? 'Queued' : 'Generating… ' + pct + '%') : escapeHtml(status)}</b>
+      ${running ? `<div class="hf-progress"><i style="width:${status === 'queued' ? 4 : pct}%"></i></div>` : ''}
+      <span>${label}</span>
+    </div></a>`;
+}
+async function loadRecent() {
+  const feed = document.getElementById('recent-feed');
+  if (!feed) return;
+  clearTimeout(recentTimer);
+  try {
+    const me = getUser();
+    let jobs = await API.get('/api/jobs');
+    // Admins get everyone's jobs from this endpoint; the studio shows your own.
+    if (me && me.id) jobs = jobs.filter(j => !j.user_id || j.user_id === me.id);
+    jobs = jobs.slice(0, 8);
+    feed.innerHTML = jobs.length
+      ? jobs.map(recentCard).join('')
+      : '<div class="hf-feed-empty" style="grid-column:1/-1">Nothing yet — your generations will appear here.</div>';
+    // Result files live on the WanGP host; if one is unreachable, show the
+    // job's card art rather than a black box or broken-image icon.
+    feed.querySelectorAll('.hf-feed-item').forEach((item, i) => {
+      const media = item.querySelector('video, img');
+      if (!media) return;
+      const fallback = () => {
+        const t = jobs[i] && jobs[i].job_type;
+        const art = document.querySelector(`.type-card[data-type="${t}"] .type-art`);
+        const img = document.createElement('img');
+        img.alt = '';
+        img.src = art ? (art.dataset.defaultSrc || art.getAttribute('src')) : '';
+        img.style.opacity = '.55';
+        media.replaceWith(img);
+      };
+      media.addEventListener('error', fallback, { once: true });
+      if (media.tagName === 'VIDEO') {
+        media.querySelector('source')?.addEventListener('error', fallback, { once: true });
+      }
+    });
+    feed.querySelectorAll('video').forEach(v => {
+      v.parentElement.addEventListener('mouseenter', () => v.play().catch(() => {}));
+      v.parentElement.addEventListener('mouseleave', () => { v.pause(); v.currentTime = 0; });
+    });
+    if (jobs.some(j => j.status === 'queued' || j.status === 'processing')) {
+      recentTimer = setTimeout(loadRecent, 4000);
+    }
+  } catch (e) {
+    feed.innerHTML = '<div class="hf-feed-empty" style="grid-column:1/-1">Couldn’t load recent jobs.</div>';
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) clearTimeout(recentTimer);
+  else if (!document.getElementById('step-two').hidden) loadRecent();
+});
+
+// Deep links from the landing page: /generate?type=t2v&prompt=…
+(function initDeepLink() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('reuse') || params.get('from_library')) return; // those flows pick the type
+  const type = params.get('type');
+  const card = type && document.querySelector(`.type-card[data-type="${CSS.escape(type)}"]`);
+  if (card) selectType(card);
+  const prompt = params.get('prompt');
+  const el = document.getElementById('prompt');
+  if (prompt && el) { el.value = prompt; el.focus(); }
+})();
 
 </script>
 {% endblock %}

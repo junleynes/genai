@@ -1,264 +1,164 @@
 {% extends "base.html" %}
+{% from "partials/tools.html" import TOOLS, CATEGORIES %}
 {% block title %}{{ settings.app_name }} – {{ settings.tagline }}{% endblock %}
-{% block scripts %}
-<script>
-(function () {
-  const el = document.getElementById('landing-auth');
-  if (!el) return;
-  const user = getUser();
-  if (user) {
-    el.innerHTML = `
-      <a href="/generate" class="text-sm px-3 py-1.5 rounded-lg btn-brand shadow-sm">Generate</a>
-      <a href="/library" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700">Library</a>
-      <a href="/jobs" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hidden sm:inline-block">Jobs</a>
-    `;
-  } else {
-    el.innerHTML = `
-      <button type="button" onclick="openLoginModal()" class="text-sm px-3 py-1.5 rounded-lg hover:bg-white/60 dark:hover:bg-slate-800/60">Log in</button>
-      <button type="button" onclick="openRegisterModal()" class="text-sm px-3 py-1.5 rounded-lg btn-brand shadow-sm">Sign up</button>
-    `;
-  }
-})();
-</script>
-{% endblock %}
 
 {% block content %}
+{%- set words = settings.tagline.split(' ') -%}
 
-<!-- Landing-only chrome (no app sidebar / top nav) -->
-<div id="landing-chrome" class="fixed top-0 inset-x-0 z-50">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
-    <a href="/" class="flex items-center gap-2 font-semibold text-sm">
-      {% if settings.logo_url %}
-      <img src="{{ settings.logo_url }}" alt="" class="h-7 w-auto rounded" />
-      {% endif %}
-      <span class="truncate max-w-[14rem]">{{ settings.app_name }}</span>
-    </a>
-    <div class="flex items-center gap-2">
-      <button type="button" onclick="toggleTheme()" class="p-2 rounded-lg hover:bg-white/60 dark:hover:bg-slate-800/60 transition" title="Theme">
-        <svg class="w-5 h-5 dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
-        <svg class="w-5 h-5 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-      </button>
-      <div id="landing-auth" class="flex items-center gap-2"></div>
-    </div>
-  </div>
-</div>
 <!-- Hero -->
-<section class="relative overflow-hidden">
-  <div class="absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/50"></div>
-  <div class="absolute top-0 right-0 w-[600px] h-[600px] bg-gradient-to-bl from-indigo-400/20 to-transparent rounded-full blur-3xl -translate-y-1/3 translate-x-1/4"></div>
-  <div class="absolute bottom-0 left-0 w-[500px] h-[500px] bg-gradient-to-tr from-cyan-400/15 to-transparent rounded-full blur-3xl translate-y-1/3 -translate-x-1/4"></div>
+<section class="hf-hero">
+  <div class="hf-hero-wall" aria-hidden="true">
+    {%- for col in range(5) %}
+    <div class="hf-hero-col">
+      {#- each column shows a rotating slice of the tools, twice, for a seamless loop -#}
+      {%- for pass in range(2) %}
+        {%- for t in TOOLS[(col * 5) % TOOLS|length:] + TOOLS[:(col * 5) % TOOLS|length] %}
+          {%- if loop.index <= 6 %}
+      <img src="{{ asset('img/cards/' ~ t.id ~ '.jpg') }}" alt="" loading="lazy" decoding="async" />
+          {%- endif %}
+        {%- endfor %}
+      {%- endfor %}
+    </div>
+    {%- endfor %}
+  </div>
+  <div class="hf-hero-fade" aria-hidden="true"></div>
 
-  <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24">
-    <div class="grid lg:grid-cols-2 gap-12 items-center">
+  <div class="hf-hero-inner">
+    <span class="hf-eyebrow"><span class="hf-dot"></span> Powered by Wan2GP · runs on your own GPU</span>
+    <h1 class="hf-display hf-hero-title">
+      {%- if words|length > 1 -%}
+        {{ words[:-1]|join(' ') }} <span class="hf-accent-word">{{ words[-1] }}</span>
+      {%- else -%}
+        {{ settings.tagline }}
+      {%- endif -%}
+    </h1>
+    <p class="hf-lede">
+      Text, images, audio, pose and footage in — cinematic video, stills and sound out.
+      {{ TOOLS|length }} tools, Easy for speed and Advanced for full control, and a personal
+      library that keeps everything you make.
+    </p>
+
+    <form class="hf-promptbar" action="/generate" method="get" id="hero-prompt">
+      <label for="hero-prompt-text" class="sr-only">Describe what you want to create</label>
+      <textarea id="hero-prompt-text" name="prompt" rows="2"
+        placeholder="A slow dolly shot through a rain-soaked neon street at night…"></textarea>
+      <div class="hf-promptbar-row">
+        <div class="hf-seg" role="radiogroup" aria-label="Output">
+          <label><input type="radio" name="type" value="t2v" checked /><span>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="m16 10 6-3v10l-6-3"/></svg>
+            Video</span></label>
+          <label><input type="radio" name="type" value="t2i" /><span>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>
+            Image</span></label>
+        </div>
+        <button type="submit" class="hf-btn hf-btn-accent hf-btn-lg">
+          Generate
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+    </form>
+
+    <div class="hf-hero-meta">
+      <span><b>{{ TOOLS|length }}</b> tools</span>
+      <span><b>LTX-2.3</b> Creative Lab</span>
+      <span><b>Easy</b> &amp; <b>Advanced</b> modes</span>
+      <span><b>Private</b> — nothing leaves your network</span>
+    </div>
+  </div>
+</section>
+
+<!-- Tools -->
+<section class="hf-section" id="tools">
+  <div class="hf-wrap">
+    <div class="hf-section-head">
       <div>
-        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand/10 text-brand text-xs font-semibold mb-6 border border-brand/20">
-          <span class="w-1.5 h-1.5 rounded-full bg-brand animate-pulse"></span>
-          Powered by Wan2GP · Local &amp; private
-        </div>
-        <h1 class="text-4xl sm:text-5xl lg:text-[3.25rem] font-bold tracking-tight leading-[1.12]">
-          {{ settings.tagline }}
-        </h1>
-        <p class="mt-6 text-lg text-slate-600 dark:text-slate-300 max-w-lg leading-relaxed">
-          A web frontend for Wan2GP: text, image, audio, pose, and video in — clips and stills out. Ten generation modes, Easy for speed and Advanced for full control. Everything you make is saved to your personal library, ready to reuse.
-        </p>
-        <div class="mt-8 flex flex-wrap gap-3">
-          <a href="/generate" class="btn-brand px-6 py-3 rounded-xl font-semibold shadow-lg shadow-indigo-500/25 hover:scale-[1.02] transition inline-flex items-center gap-2">
-            Start generating
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
-          </a>
-          <a href="/library" class="px-6 py-3 rounded-xl font-semibold border border-slate-300 dark:border-slate-700 hover:bg-white/60 dark:hover:bg-slate-800/60 transition">
-            My library
-          </a>
-        </div>
-        <div class="mt-10 flex flex-wrap gap-x-6 gap-y-3 text-sm text-slate-500 dark:text-slate-400">
-          <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> Face swap &amp; multi-subject</div>
-          <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> Pose-driven video</div>
-          <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> Character sheets</div>
-          <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> Personal library</div>
-        </div>
+        <h2 class="hf-h2">Every tool, one studio</h2>
+        <p>From a single prompt to face swaps, relighting and restoration — pick a tool and start creating.</p>
       </div>
+      <div class="hf-chips" role="group" aria-label="Filter tools">
+        <button type="button" class="hf-chip" data-filter="all" aria-pressed="true">All<span class="hf-chip-count">{{ TOOLS|length }}</span></button>
+        {%- for c in CATEGORIES %}
+        <button type="button" class="hf-chip" data-filter="{{ c.id }}" aria-pressed="false">{{ c.name }}<span class="hf-chip-count">{{ TOOLS|selectattr('cat', 'equalto', c.id)|list|length }}</span></button>
+        {%- endfor %}
+      </div>
+    </div>
 
-      <!-- Hero visual collage -->
-      <div class="relative">
-        <div class="grid grid-cols-2 gap-3 sm:gap-4">
-          <div class="space-y-3 sm:space-y-4">
-            <div class="rounded-2xl overflow-hidden shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-slate-900">
-              <img src="/static/img/cards/t2v.jpg" alt="Text to video" class="w-full h-full object-cover" loading="lazy" />
-            </div>
-            <div class="rounded-2xl overflow-hidden shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-slate-900">
-              <img src="/static/img/cards/v2v.jpg" alt="Video to video" class="w-full h-full object-cover" loading="lazy" />
-            </div>
-          </div>
-          <div class="space-y-3 sm:space-y-4 pt-8">
-            <div class="rounded-2xl overflow-hidden shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-slate-900 relative">
-              <img src="/static/img/cards/p2v.jpg" alt="Pose driven video" class="w-full h-full object-cover" loading="lazy" />
-            </div>
-            <div class="rounded-2xl overflow-hidden shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-slate-900">
-              <img src="/static/img/cards/t2i.jpg" alt="Text to image" class="w-full h-full object-cover" loading="lazy" />
-            </div>
-          </div>
+    <div class="hf-tile-grid" id="tool-grid">
+      {%- for t in TOOLS %}
+      <a class="hf-tile" href="/generate?type={{ t.id }}" data-cat="{{ t.cat }}">
+        <div class="hf-tile-media">
+          <img src="{{ asset('img/cards/' ~ t.id ~ '.jpg') }}" alt="" width="900" height="604" loading="lazy" decoding="async" />
+          {%- if t.new %}<div class="hf-tile-badges"><span class="hf-new">New</span></div>{% endif %}
         </div>
-        <!-- Floating badge -->
-        <div class="absolute -bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-white dark:bg-slate-900 shadow-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold flex items-center gap-2 whitespace-nowrap">
-          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          10 generation modes · Easy &amp; Advanced
+        <div class="hf-tile-cap">
+          <div class="hf-tile-name">{{ t.name }}</div>
+          <div class="hf-tile-desc">{{ t.desc }}</div>
         </div>
+      </a>
+      {%- endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- Why -->
+<section class="hf-section" style="padding-top:0">
+  <div class="hf-wrap">
+    <div class="hf-features">
+      <div class="hf-feature">
+        <div class="hf-feature-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></div>
+        <h3>Easy or Advanced</h3>
+        <p>Easy picks the model, LoRA and settings for each tool. Advanced exposes every knob — model, LoRAs, steps, guidance, seed.</p>
+      </div>
+      <div class="hf-feature">
+        <div class="hf-feature-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+        <h3>Your personal library</h3>
+        <p>Every result is filed with its prompt, model and seed. Favourite it, search it, and feed it straight back into a new generation.</p>
+      </div>
+      <div class="hf-feature">
+        <div class="hf-feature-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7v6c0 5 3.8 8.6 9 9 5.2-.4 9-4 9-9V7l-9-5Z"/><path d="m9 12 2 2 4-4"/></svg></div>
+        <h3>Private by design</h3>
+        <p>Generation runs on your own Wan2GP server. Jobs belong to the person who made them; admins manage the queue.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- Modes showcase -->
-<section class="py-20 bg-white dark:bg-slate-950/50 border-y border-slate-200/80 dark:border-slate-800">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="text-center max-w-2xl mx-auto mb-12">
-      <h2 class="text-2xl sm:text-3xl font-bold tracking-tight">Everything you need to create</h2>
-      <p class="mt-3 text-slate-600 dark:text-slate-400">Ten generation modes, one workspace — from a text prompt to face swap, multi-subject scenes, and character sheets.</p>
-    </div>
-    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden bg-slate-900" style="aspect-ratio: 1168 / 784;">
-          <img src="/static/img/cards/t2v.jpg" alt="" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/60 text-white backdrop-blur-sm">T2V</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Text → Video</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Describe a scene. Get a short cinematic clip with Easy presets or full Advanced controls.</p>
-        </div>
+<!-- CTA -->
+<section class="hf-section" style="padding-top:0">
+  <div class="hf-wrap">
+    <div class="hf-cta">
+      <div>
+        <h2 class="hf-display">Start creating</h2>
+        <p>Pick a tool, write a prompt, and everything you make lands in your library.</p>
       </div>
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden bg-slate-900" style="aspect-ratio: 1168 / 784;">
-          <img src="/static/img/cards/i2v.jpg" alt="" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/60 text-white backdrop-blur-sm">I2V</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Image → Video</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Animate a still. Optional end frame for guided motion between two images.</p>
-        </div>
-      </div>
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden bg-slate-900" style="aspect-ratio: 1168 / 784;">
-          <img src="/static/img/cards/ia2v.jpg" alt="" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/60 text-white backdrop-blur-sm">IA2V</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Image + Audio → Video</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Drive motion and lip-sync from an image and soundtrack. Built for talking heads and music clips.</p>
-        </div>
-      </div>
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden bg-slate-900" style="aspect-ratio: 1168 / 784;">
-          <img src="/static/img/cards/p2v.jpg" alt="" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/60 text-white backdrop-blur-sm">P2V · New</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Pose Driven → Video</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Transfer a performance from a driving clip onto your own subject. Pose, depth, edges, or motion flow, with adjustable strength.</p>
-        </div>
-      </div>
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden bg-slate-900" style="aspect-ratio: 1168 / 784;">
-          <img src="/static/img/cards/v2v.jpg" alt="" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/60 text-white backdrop-blur-sm">V2V</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Video → Video</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Restyle, extend, or transform existing footage with prompt guidance and optional end frames.</p>
-        </div>
-      </div>
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden bg-slate-900" style="aspect-ratio: 1168 / 784;">
-          <img src="/static/img/cards/t2i.jpg" alt="" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/60 text-white backdrop-blur-sm">T2I</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Text → Image</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Generate stills with the same Easy / Advanced workflow used for video.</p>
-        </div>
-      </div>
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden bg-slate-900" style="aspect-ratio: 1168 / 784;">
-          <img src="/static/img/cards/i2i.jpg" alt="" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/60 text-white backdrop-blur-sm">I2I</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Image → Image</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Re-imagine a reference image with new styles, lighting, and variations.</p>
-        </div>
-      </div>
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden bg-slate-900" style="aspect-ratio: 1168 / 784;">
-          <img src="/static/img/cards/fs.jpg" alt="" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/60 text-white backdrop-blur-sm">FS · New</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Face Swap → Video</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Put one person's face onto a source video while keeping the motion, pose, and scene.</p>
-        </div>
-      </div>
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden bg-slate-900" style="aspect-ratio: 1168 / 784;">
-          <img src="/static/img/cards/msr.jpg" alt="" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/60 text-white backdrop-blur-sm">MSR · New</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Multi-Subject Reference → Video</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Compose a scene from 2–5 reference images — background first, then characters and objects. Powered by LTX-2.3 MSR.</p>
-        </div>
-      </div>
-
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden bg-slate-900" style="aspect-ratio: 1168 / 784;">
-          <img src="/static/img/cards/cs.jpg" alt="" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/60 text-white backdrop-blur-sm">CS · New</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Character Sheet</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Generate a multi-view reference sheet of one character — ideal identity stills for MSR, VACE, or further edits.</p>
-        </div>
-      </div>
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden flex items-center justify-center text-white" style="aspect-ratio: 1168 / 784; background: linear-gradient(135deg,#4338ca,#7c3aed 55%,#0891b2);">
-          <svg class="w-14 h-14 opacity-90 group-hover:scale-110 transition duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 018.25 20.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/>
-          </svg>
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/40 text-white backdrop-blur-sm">Library</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Your personal library</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Every result is filed automatically with its prompt, model, and seed. Favourite it, search it, and feed it straight back into a new generation.</p>
-        </div>
-      </div>
-      <div class="group rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-brand/40 hover:shadow-xl transition bg-white dark:bg-slate-900/60">
-        <div class="relative overflow-hidden flex items-center justify-center text-white" style="aspect-ratio: 1168 / 784; background: linear-gradient(135deg,#0f172a,#334155 55%,#1e3a8a);">
-          <svg class="w-14 h-14 opacity-90 group-hover:scale-110 transition duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"/>
-          </svg>
-          <span class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/40 text-white backdrop-blur-sm">Queue</span>
-        </div>
-        <div class="p-5">
-          <h3 class="font-semibold text-lg">Jobs you own</h3>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Every generation is attached to your account. Admins can oversee the queue; users only see their own.</p>
-        </div>
-      </div>
+      <a href="/generate" class="hf-btn hf-btn-lg">
+        Open the studio
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
     </div>
   </div>
 </section>
+{% endblock %}
 
-<!-- CTA band -->
-<section class="py-16">
-  <div class="max-w-4xl mx-auto px-4 text-center">
-    <div class="rounded-3xl p-10 sm:p-14 bg-gradient-to-br from-indigo-600 via-violet-600 to-cyan-600 text-white shadow-2xl shadow-indigo-500/20 relative overflow-hidden">
-      <div class="absolute inset-0 opacity-30 mix-blend-overlay"
-           style="background-image: radial-gradient(circle at 20% 20%, rgba(255,255,255,.5), transparent 45%), radial-gradient(circle at 80% 70%, rgba(255,255,255,.35), transparent 40%);"></div>
-      <div class="relative">
-        <h2 class="text-2xl sm:text-3xl font-bold">Ready to create?</h2>
-        <p class="mt-3 text-white/85 max-w-md mx-auto">Pick a mode, choose Easy or Advanced, and everything you make lands in your library.</p>
-        <a href="/generate" class="mt-6 inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white text-indigo-700 font-semibold hover:bg-indigo-50 transition shadow-lg">
-          Open generator
-        </a>
-      </div>
-    </div>
-  </div>
-</section>
+{% block scripts %}
+<script>
+// Category filter for the tools gallery.
+(function () {
+  const chips = document.querySelectorAll('.hf-chip[data-filter]');
+  const tiles = document.querySelectorAll('#tool-grid .hf-tile');
+  chips.forEach(chip => chip.addEventListener('click', () => {
+    const f = chip.dataset.filter;
+    chips.forEach(c => c.setAttribute('aria-pressed', String(c === chip)));
+    tiles.forEach(t => { t.hidden = f !== 'all' && t.dataset.cat !== f; });
+  }));
+})();
+
+// Enter submits the hero prompt; Shift+Enter keeps a newline.
+document.getElementById('hero-prompt-text')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    e.target.form.requestSubmit();
+  }
+});
+</script>
 {% endblock %}

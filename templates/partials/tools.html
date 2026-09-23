@@ -1,0 +1,46 @@
+{#-
+  Every generation tool the UI offers, in display order. The landing gallery
+  and the Generate page's type picker both render from this list, so a new
+  tool is one entry here (plus its card art at static/img/cards/<id>.jpg).
+  `id` must match a backend job type (app/main.py ALL_JOB_TYPES).
+-#}
+{% set CATEGORIES = [
+  {"id": "video",   "name": "Video"},
+  {"id": "people",  "name": "Characters"},
+  {"id": "image",   "name": "Image"},
+  {"id": "edit",    "name": "Edit"},
+  {"id": "restore", "name": "Restore"},
+  {"id": "audio",   "name": "Audio"},
+] %}
+
+{% set TOOLS = [
+  {"id": "t2v",  "cat": "video", "name": "Text to Video",        "label": "Text → Video",                    "desc": "Describe a shot, get a cinematic clip."},
+  {"id": "i2v",  "cat": "video", "name": "Image to Video",       "label": "Image → Video",                   "desc": "Animate a still, with an optional end frame."},
+  {"id": "ia2v", "cat": "video", "name": "Image + Audio",        "label": "Image + Audio → Video",           "desc": "Drive motion and lip-sync from a soundtrack."},
+  {"id": "v2v",  "cat": "video", "name": "Video to Video",       "label": "Video → Video",                   "desc": "Restyle or transform existing footage."},
+  {"id": "p2v",  "cat": "video", "name": "Pose Driven",          "label": "Pose Driven → Video",             "desc": "Transfer a performance from a driving clip."},
+
+  {"id": "fs",          "cat": "people", "name": "Face Swap",          "label": "Face Swap → Video",               "desc": "Put a new face onto a source video."},
+  {"id": "msr",         "cat": "people", "name": "Multi-Subject",      "label": "Multi-Subject Reference → Video", "desc": "Compose a scene from 2–5 reference images."},
+  {"id": "ingredients", "cat": "people", "name": "Ingredients",        "label": "Ingredients → Video",             "desc": "A reference sheet drives the whole scene."},
+  {"id": "cs",          "cat": "people", "name": "Character Sheet",    "label": "Character Sheet",                 "desc": "Multi-view reference sheet of one character."},
+
+  {"id": "t2i",  "cat": "image", "name": "Text to Image",  "label": "Text → Image",  "desc": "Generate stills from a prompt."},
+  {"id": "i2i",  "cat": "image", "name": "Image to Image", "label": "Image → Image", "desc": "Re-imagine a reference image."},
+
+  {"id": "outpaint",    "cat": "edit", "name": "In / Outpaint",   "label": "In / Outpaint → Video",    "desc": "Fill or extend the frame of a video."},
+  {"id": "cleanplate",  "cat": "edit", "name": "Clean Plate",     "label": "Clean Plate → Video",      "desc": "Remove people and objects from a shot."},
+  {"id": "relight",     "cat": "edit", "name": "Relight",         "label": "Relight → Video",          "desc": "Change the lighting of existing footage."},
+  {"id": "daynight",    "cat": "edit", "name": "Day to Night",    "label": "Day → Night",              "desc": "Turn daytime footage into night."},
+  {"id": "colorize",    "cat": "edit", "name": "Colorize",        "label": "Colorize → Video",         "desc": "Bring black-and-white video to color."},
+  {"id": "water",       "cat": "edit", "name": "Water Simulation","label": "Water Simulation → Video", "desc": "Add rain, surf, floods and splashes.", "new": true},
+  {"id": "shave",       "cat": "edit", "name": "Instant Shave",   "label": "Instant Shave → Video",    "desc": "Remove facial hair, keep identity.",   "new": true},
+  {"id": "crosseyed",   "cat": "edit", "name": "Cross-Eyed",      "label": "Cross-Eyed → Video",       "desc": "Turn eyes inward in close-up portraits.", "new": true},
+  {"id": "cinemagraph", "cat": "edit", "name": "Cinemagraph",     "label": "Cinemagraph",              "desc": "Loop selective motion from a still.",  "new": true},
+
+  {"id": "upscale",    "cat": "restore", "name": "Upscale",    "label": "Upscale → Video",    "desc": "Generative 2× detail upscale."},
+  {"id": "deblur",     "cat": "restore", "name": "Deblur",     "label": "Deblur → Video",     "desc": "Restore focus to soft footage.",              "new": true},
+  {"id": "decompress", "cat": "restore", "name": "Decompress", "label": "Decompress → Video", "desc": "Remove blocking, banding and ringing.",       "new": true},
+
+  {"id": "foley", "cat": "audio", "name": "Foley", "label": "Foley → Audio", "desc": "Synced sound effects from silent video."},
+] %}
