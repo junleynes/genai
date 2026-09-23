@@ -1,5 +1,5 @@
 """
-Opensource Generative AI – Modern frontend for Wan2GP
+LTX Creative Lab – Modern frontend for Wan2GP
 User/Job management • Branding • Easy & Advanced generation modes
 """
 import asyncio
@@ -46,7 +46,7 @@ logger = logging.getLogger("genai")
 
 BASE = Path(__file__).parent.parent
 
-app = FastAPI(title="Opensource Generative AI", version="1.0.0")
+app = FastAPI(title="LTX Creative Lab", version="1.0.0")
 
 
 @app.on_event("startup")
@@ -77,7 +77,7 @@ async def _startup_queue_hook():
     except Exception:
         logger.exception("queue startup recovery failed")
 
-    logger.info("Opensource Generative AI ready")
+    logger.info("LTX Creative Lab ready")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
@@ -145,7 +145,7 @@ templates.env.globals["asset"] = asset
 def api_version():
     """Use this to verify the deployed code is MCP (not Gradio mock)."""
     return {
-        "app": "Opensource Generative AI",
+        "app": "LTX Creative Lab",
         "backend": BACKEND_ID,
         "built": BACKEND_BUILT,
         "mock": False,
@@ -155,7 +155,7 @@ def api_version():
 @app.on_event("startup")
 def startup():
     db.ensure_admin()
-    logger.info("Opensource Generative AI ready")
+    logger.info("LTX Creative Lab ready")
 
 
 # ─── Pydantic models ──────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-# Opensource Generative AI
+# LTX Creative Lab
 
 Modern web frontend for **Wan2GP** (WanGP): generate video and images through a clean UI, with user & job management, branding, Easy/Advanced modes, light/dark theme, and remote MCP integration.
 

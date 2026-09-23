@@ -37,9 +37,9 @@ def _save(path: Path, data: Any) -> None:
 # ─── Settings / Branding ───────────────────────────────────────────────────────
 
 DEFAULT_SETTINGS = {
-    "app_name": "Opensource Generative AI",
+    "app_name": "LTX Creative Lab",
     "tagline": "Simplify AI Video & Image Generation",
-    "footer": "© 2026 Opensource Generative AI.",
+    "footer": "© 2026 LTX Creative Lab.",
     "logo_url": "",
     "favicon_url": "",
     "primary_color": "#d1fe17",   # electric lime (Higgsfield-style); editable in Admin → Branding

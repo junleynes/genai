@@ -1,1 +1,1 @@
-# Opensource Generative AI application package
+# LTX Creative Lab application package

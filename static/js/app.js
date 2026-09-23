@@ -1,5 +1,5 @@
 /**
- * Opensource Generative AI client – auth, theme, top nav, helpers
+ * LTX Creative Lab client – auth, theme, top nav, helpers
  */
 const TOKEN_KEY = 'genai_token';
 const USER_KEY = 'genai_user';
