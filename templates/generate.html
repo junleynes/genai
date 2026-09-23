@@ -82,7 +82,7 @@
         <select name="model" id="model-select" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-sm">
           <option value="auto">Auto (server default)</option>
         </select>
-        <p id="model-hint" class="text-xs text-slate-400 mt-1">Models filtered for this mode via MCP wangp_list_models.</p>
+        <p id="model-hint" class="text-xs text-slate-400 mt-1">Only models that can make this type of output are listed.</p>
       </div>
 
       <p id="easy-model-note" class="text-xs text-slate-400 hidden">
@@ -146,7 +146,7 @@
               class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-xs"></textarea>
             <p class="text-xs text-slate-400 mt-1">
               <code>filename:weight</code> pairs, comma or newline separated. Weight defaults to 1.0.
-              Filenames must match WanGP's Loras list for the selected model.
+              Filenames must match the LoRAs installed for the selected model.
             </p>
           </div>
           <input type="hidden" name="loras" id="loras-hidden" disabled />
@@ -534,7 +534,7 @@ async function loadLoras() {
 
   if (!data.supported) {
     loraModeManual(true);
-    status.textContent = 'This WanGP build has no LoRA list — enter filenames manually.';
+    status.textContent = 'No LoRA list available from the server — enter filenames manually.';
     status.className = 'text-xs text-slate-400 mt-1';
     return;
   }

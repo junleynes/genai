@@ -39,7 +39,7 @@ def _save(path: Path, data: Any) -> None:
 DEFAULT_SETTINGS = {
     "app_name": "Opensource Generative AI",
     "tagline": "Simplify AI Video & Image Generation",
-    "footer": "© 2026 Opensource Generative AI. Powered by Wan2GP.",
+    "footer": "© 2026 Opensource Generative AI.",
     "logo_url": "",
     "favicon_url": "",
     "primary_color": "#d1fe17",   # electric lime (Higgsfield-style); editable in Admin → Branding
