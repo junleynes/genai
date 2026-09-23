@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import auth, db
+from . import auth, catalog, db
 from . import generation as gen_mod
 from .generation import CREATIVE_LAB_TYPES, process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type, list_loras_for_model, try_start_queued_jobs, mcp_discover_tools, mcp_ensure_session
 
@@ -39,6 +39,11 @@ VIDEO_JOB_TYPES = tuple(t for t in ALL_JOB_TYPES if t not in IMAGE_JOB_TYPES)
 CREATIVE_IMAGE_INPUT_TYPES = ("ingredients", "cinemagraph")
 CREATIVE_VIDEO_SOURCE_TYPES = tuple(
     t for t in CREATIVE_LAB_TYPES if t not in CREATIVE_IMAGE_INPUT_TYPES
+)
+# The UI catalog and the backend must describe the same set of tools.
+assert set(catalog.TOOL_IDS) == set(ALL_JOB_TYPES), (
+    "app/catalog.py TOOLS and ALL_JOB_TYPES disagree: "
+    f"{sorted(set(catalog.TOOL_IDS) ^ set(ALL_JOB_TYPES))}"
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -138,6 +143,12 @@ def asset(path: str) -> str:
 templates.env.filters["brand_ink"] = brand_ink
 templates.env.filters["brand_text"] = brand_text
 templates.env.globals["asset"] = asset
+templates.env.globals["visible_tools"] = catalog.visible_tools
+templates.env.globals["all_tools"] = catalog.all_tools
+templates.env.globals["categories_for"] = catalog.categories_for
+templates.env.globals["TOOL_STATUSES"] = catalog.TOOL_STATUSES
+templates.env.globals["TOOL_STATUS_LABELS"] = catalog.STATUS_LABELS
+templates.env.globals["TOOL_CATEGORIES"] = catalog.CATEGORIES
 
 
 
@@ -338,6 +349,40 @@ def public_settings():
 def update_branding(body: BrandingIn, admin: dict = Depends(auth.require_admin)):
     data = body.model_dump(exclude_none=True)
     return db.update_settings(data)
+
+
+class ToolStatusIn(BaseModel):
+    tool_status: dict[str, str]
+
+
+@app.get("/api/admin/tools")
+def get_tools(admin: dict = Depends(auth.require_admin)):
+    return {
+        "statuses": list(catalog.TOOL_STATUSES),
+        "tools": catalog.all_tools(db.get_settings()),
+    }
+
+
+@app.put("/api/admin/tools")
+def update_tools(body: ToolStatusIn, admin: dict = Depends(auth.require_admin)):
+    try:
+        clean = catalog.validate_statuses(body.tool_status)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    # Merge so a partial update doesn't reset tools it didn't mention.
+    current = dict(db.get_settings().get("tool_status") or {})
+    current.update(clean)
+    db.update_settings({"tool_status": current})
+    return {"ok": True, "tools": catalog.all_tools(db.get_settings())}
+
+
+def _require_usable_tool(job_type: str) -> None:
+    """Coming-soon and disabled tools can't take jobs, however they're reached
+    (hidden card, stale tab, direct API call, or a retry of an old job)."""
+    status = catalog.tool_status(db.get_settings(), job_type)
+    if status not in catalog.USABLE_STATUSES:
+        label = catalog.STATUS_LABELS.get(status, status).lower()
+        raise HTTPException(403, f"This tool is {label} and can't be used right now.")
 
 
 @app.put("/api/admin/server")
@@ -718,6 +763,7 @@ async def retry_job(
         raise HTTPException(403, "Not your job")
     if job.get("status") not in ("failed", "completed", "cancelled", "canceled"):
         raise HTTPException(400, "Only failed, cancelled, or completed jobs can be retried")
+    _require_usable_tool(job.get("job_type") or "")
 
     db.update_job(job_id, {
         "status": "queued",
@@ -887,6 +933,7 @@ async def create_job(
     allowed = set(ALL_JOB_TYPES)
     if job_type not in allowed:
         raise HTTPException(400, f"Invalid job_type. Allowed: {sorted(allowed)}")
+    _require_usable_tool(job_type)
     if mode not in ("easy", "advanced"):
         raise HTTPException(400, "mode must be easy or advanced")
 
@@ -1225,6 +1272,11 @@ def branding_page(request: Request):
 @app.get("/admin/server", response_class=HTMLResponse)
 def server_page(request: Request):
     return _page(request, "admin_server.html")
+
+
+@app.get("/admin/tools", response_class=HTMLResponse)
+def tools_page(request: Request):
+    return _page(request, "admin_tools.html")
 
 
 @app.get("/admin/users", response_class=HTMLResponse)

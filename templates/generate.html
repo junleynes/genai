@@ -1,7 +1,8 @@
 {% extends "base.html" %}
-{% from "partials/tools.html" import TOOLS, CATEGORIES %}
 {% block title %}Generate – {{ settings.app_name }}{% endblock %}
 {% block content %}
+{%- set TOOLS = visible_tools(settings) %}
+{%- set CATEGORIES = categories_for(TOOLS) %}
 <div class="hf-studio">
 
   <!-- Step 1: pick a tool -->
@@ -14,19 +15,26 @@
       <div class="hf-chips" role="group" aria-label="Filter tools">
         <button type="button" class="hf-chip" data-filter="all" aria-pressed="true">All<span class="hf-chip-count">{{ TOOLS|length }}</span></button>
         {%- for c in CATEGORIES %}
-        <button type="button" class="hf-chip" data-filter="{{ c.id }}" aria-pressed="false">{{ c.name }}<span class="hf-chip-count">{{ TOOLS|selectattr('cat', 'equalto', c.id)|list|length }}</span></button>
+        <button type="button" class="hf-chip" data-filter="{{ c.id }}" aria-pressed="false">{{ c.name }}<span class="hf-chip-count">{{ c.count }}</span></button>
         {%- endfor %}
       </div>
     </div>
 
+    {%- if not TOOLS %}
+    <p class="hf-muted">No tools are available right now. An admin can enable them in Admin → Tools.</p>
+    {%- endif %}
     <div id="type-tabs" class="hf-tile-grid" role="radiogroup" aria-label="Generation type">
       {%- for t in TOOLS %}
-      <button type="button" data-type="{{ t.id }}" data-cat="{{ t.cat }}" role="radio" aria-checked="false" tabindex="0"
-        class="type-card hf-tile" data-label="{{ t.label }}" aria-label="{{ t.name }}. {{ t.desc }}">
+      {%- set soon = t.status == 'coming_soon' %}
+      <button type="button" data-type="{{ t.id }}" data-cat="{{ t.cat }}" role="radio" aria-checked="false"
+        tabindex="{{ -1 if soon else 0 }}"{% if soon %} disabled aria-disabled="true"{% endif %}
+        class="type-card hf-tile{% if soon %} is-soon{% endif %}" data-label="{{ t.label }}"
+        aria-label="{{ t.name }}{% if soon %} (coming soon){% endif %}. {{ t.desc }}">
         <span class="hf-tile-media">
           <img class="type-art" src="{{ asset('img/cards/' ~ t.id ~ '.jpg') }}" alt="" aria-hidden="true"
                width="900" height="604" loading="lazy" decoding="async" />
-          {%- if t.new %}<span class="hf-tile-badges"><span class="hf-new">New</span></span>{% endif %}
+          {%- if t.status == 'new' %}<span class="hf-tile-badges"><span class="hf-new">New</span></span>
+          {%- elif t.status == 'coming_soon' %}<span class="hf-tile-badges"><span class="hf-soon">Coming soon</span></span>{% endif %}
           <span class="type-check" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
                  stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
@@ -872,7 +880,7 @@ document.querySelectorAll('.type-card').forEach(btn => {
     if (!keys.includes(e.key)) return;
     e.preventDefault();
     // Only cards visible under the current category filter.
-    const cards = [...document.querySelectorAll('.type-card')].filter(c => !c.hidden);
+    const cards = [...document.querySelectorAll('.type-card')].filter(c => !c.hidden && !c.disabled);
     const i = cards.indexOf(btn);
     const step = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1 : -1;
     const next = cards[(i + step + cards.length) % cards.length];
@@ -1210,7 +1218,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLibMo
                  : seed.media_type === 'audio' ? 'ia2v' : 'i2i';
     if (!currentType || !['i2v','i2i','ia2v','v2v'].includes(currentType)) {
       const btn = document.querySelector(`.type-card[data-type="${wanted}"]`);
-      if (btn) selectType(btn);
+      if (btn && !btn.disabled) selectType(btn);
     }
     applyLibrarySeed(seed);
     sessionStorage.removeItem('library_seed');
@@ -1223,7 +1231,10 @@ function applyReusedJob(data) {
   if (!data || !data.job_type) return false;
 
   const card = document.querySelector(`.type-card[data-type="${data.job_type}"]`);
-  if (!card) return false;
+  if (!card || card.disabled) {
+    toast('That tool isn\u2019t available right now', 'error');
+    return false;
+  }
   selectType(card);            // also reveals the form and hides the picker
 
   if (data.mode === 'advanced') {
@@ -1410,7 +1421,8 @@ document.addEventListener('visibilitychange', () => {
   if (params.get('reuse') || params.get('from_library')) return; // those flows pick the type
   const type = params.get('type');
   const card = type && document.querySelector(`.type-card[data-type="${CSS.escape(type)}"]`);
-  if (card) selectType(card);
+  if (card && !card.disabled) selectType(card);
+  else if (type) toast('That tool isn\u2019t available right now', 'error');
   const prompt = params.get('prompt');
   const el = document.getElementById('prompt');
   if (prompt && el) { el.value = prompt; el.focus(); }

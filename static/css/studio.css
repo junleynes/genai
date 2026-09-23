@@ -736,3 +736,67 @@ html.studio .hf-media-missing {
   display: grid; place-items: center; height: 10rem;
   background: var(--hf-surface-2); color: var(--hf-dim); font-size: 12px;
 }
+
+/* ── Tool status: coming soon ─────────────────────────────────────────── */
+.hf-soon {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: 6px;
+  font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  background: rgba(10, 10, 11, .78); color: #f4f4f5;
+  border: 1px solid rgba(255, 255, 255, .18);
+  backdrop-filter: blur(6px);
+}
+.hf-tile.is-soon { cursor: not-allowed; }
+.hf-tile.is-soon .hf-tile-media img { filter: grayscale(.85) brightness(.55); }
+.hf-tile.is-soon .hf-tile-cap { opacity: .55; }
+/* No lift, glow, zoom or sheen: it isn't actionable. */
+.hf-tile.is-soon:hover .hf-tile-media {
+  --lift: 0px; border-color: var(--hf-border); box-shadow: none;
+}
+.hf-tile.is-soon:hover .hf-tile-media img { transform: none; }
+.hf-tile.is-soon:hover .hf-tile-media::after { opacity: 0; }
+.hf-tile.is-soon:hover .hf-tile-name { color: inherit; }
+.type-card.is-soon .type-check { display: none; }
+
+/* ── Admin → Tools ────────────────────────────────────────────────────── */
+.hf-tools-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 22px 0 18px; }
+.hf-tools-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--hf-muted); }
+.hf-tools-legend b { color: var(--hf-text); font-weight: 600; }
+.hf-tools-cat { margin-top: 26px; }
+.hf-tools-cat h2 { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--hf-dim); margin-bottom: 10px; }
+.hf-tools-list { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); }
+.hf-tool-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px; border-radius: 16px;
+  background: var(--hf-surface); border: 1px solid var(--hf-border);
+  transition: border-color .15s ease, opacity .15s ease;
+}
+.hf-tool-row img { width: 84px; height: 56px; flex: none; border-radius: 10px; object-fit: cover; background: #000; }
+.hf-tool-row[data-status="disabled"] img { filter: grayscale(1) brightness(.5); }
+.hf-tool-row[data-status="coming_soon"] img { filter: grayscale(.85) brightness(.6); }
+.hf-tool-row.is-dirty { border-color: var(--hf-accent); }
+.hf-tool-meta { flex: 1; min-width: 0; }
+.hf-tool-meta p:first-child { font-weight: 650; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.hf-tool-meta p:last-child { font-size: 12px; color: var(--hf-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hf-tool-meta code { font-size: 11px; color: var(--hf-dim); font-weight: 500; }
+/* Status segmented control */
+.hf-status { display: inline-flex; flex: none; padding: 3px; border-radius: 12px; background: var(--hf-surface-2); border: 1px solid var(--hf-border); }
+.hf-status label { position: relative; }
+.hf-status input { position: absolute; opacity: 0; pointer-events: none; }
+.hf-status span {
+  display: grid; place-items: center; width: 34px; height: 30px; border-radius: 9px;
+  color: var(--hf-dim); cursor: pointer; transition: background .15s ease, color .15s ease;
+}
+.hf-status span:hover { color: var(--hf-text); }
+.hf-status input:focus-visible + span { outline: 2px solid var(--hf-accent); outline-offset: 1px; }
+.hf-status input:checked + span { background: var(--hf-surface); color: var(--hf-text); box-shadow: 0 0 0 1px var(--hf-border-strong); }
+.hf-status input[value="new"]:checked + span { background: var(--hf-accent); color: var(--hf-accent-ink); box-shadow: none; }
+.hf-status input[value="disabled"]:checked + span { background: #3f1d1d; color: #fca5a5; box-shadow: none; }
+html.studio:not(.dark) .hf-status input[value="disabled"]:checked + span { background: #fee2e2; color: #b91c1c; }
+.hf-savebar {
+  position: sticky; bottom: 16px; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 26px; padding: 12px 12px 12px 18px; border-radius: 16px;
+  background: var(--hf-surface); border: 1px solid var(--hf-border-strong); box-shadow: var(--hf-shadow);
+}
+.hf-savebar p { font-size: 14px; color: var(--hf-muted); }

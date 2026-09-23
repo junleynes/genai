@@ -128,6 +128,9 @@ DEFAULT_SETTINGS = {
     "default_loras_crosseyed": "lora_weights_step_03000.safetensors:1.0",
     "default_loras_shave": "ltx-2.3-22b-ic-lora-instant-shave-0.9.safetensors:1.0",
     "default_loras_cinemagraph": "ltx-2.3-22b-lora-cinemagraph-0.9.safetensors:1.0",
+    # Per-tool status set in Admin → Tools: enabled | new | coming_soon | disabled.
+    # Tools not listed use catalog.DEFAULT_STATUS.
+    "tool_status": {},
     "default_resolution": "1280x704",
     "default_steps": 8,
     "default_fps": "24",

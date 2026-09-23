@@ -1,12 +1,15 @@
 {% extends "base.html" %}
-{% from "partials/tools.html" import TOOLS, CATEGORIES %}
 {% block title %}{{ settings.app_name }} – {{ settings.tagline }}{% endblock %}
 
 {% block content %}
+{%- set TOOLS = visible_tools(settings) %}
+{%- set CATEGORIES = categories_for(TOOLS) %}
+{%- set USABLE = TOOLS|rejectattr('status', 'equalto', 'coming_soon')|list %}
 {%- set words = settings.tagline.split(' ') -%}
 
 <!-- Hero -->
 <section class="hf-hero">
+  {%- if TOOLS %}
   <div class="hf-hero-wall" aria-hidden="true">
     {%- for col in range(5) %}
     <div class="hf-hero-col">
@@ -21,10 +24,11 @@
     </div>
     {%- endfor %}
   </div>
+  {%- endif %}
   <div class="hf-hero-fade" aria-hidden="true"></div>
 
   <div class="hf-hero-inner">
-    <span class="hf-eyebrow"><span class="hf-dot"></span> {{ TOOLS|length }} tools · one studio</span>
+    <span class="hf-eyebrow"><span class="hf-dot"></span> {{ USABLE|length }} tools · one studio</span>
     <h1 class="hf-display hf-hero-title">
       {%- if words|length > 1 -%}
         {{ words[:-1]|join(' ') }} <span class="hf-accent-word">{{ words[-1] }}</span>
@@ -76,23 +80,36 @@
       <div class="hf-chips" role="group" aria-label="Filter tools">
         <button type="button" class="hf-chip" data-filter="all" aria-pressed="true">All<span class="hf-chip-count">{{ TOOLS|length }}</span></button>
         {%- for c in CATEGORIES %}
-        <button type="button" class="hf-chip" data-filter="{{ c.id }}" aria-pressed="false">{{ c.name }}<span class="hf-chip-count">{{ TOOLS|selectattr('cat', 'equalto', c.id)|list|length }}</span></button>
+        <button type="button" class="hf-chip" data-filter="{{ c.id }}" aria-pressed="false">{{ c.name }}<span class="hf-chip-count">{{ c.count }}</span></button>
         {%- endfor %}
       </div>
     </div>
 
     <div class="hf-tile-grid" id="tool-grid">
+      {%- if not TOOLS %}
+      <p class="hf-muted">No tools are available right now.</p>
+      {%- endif %}
       {%- for t in TOOLS %}
+      {%- set soon = t.status == 'coming_soon' %}
+      {%- if soon %}
+      <div class="hf-tile is-soon" data-cat="{{ t.cat }}" aria-disabled="true">
+      {%- else %}
       <a class="hf-tile" href="/generate?type={{ t.id }}" data-cat="{{ t.cat }}">
+      {%- endif %}
         <div class="hf-tile-media">
           <img src="{{ asset('img/cards/' ~ t.id ~ '.jpg') }}" alt="" width="900" height="604" loading="lazy" decoding="async" />
-          {%- if t.new %}<div class="hf-tile-badges"><span class="hf-new">New</span></div>{% endif %}
+          {%- if t.status == 'new' %}<div class="hf-tile-badges"><span class="hf-new">New</span></div>
+          {%- elif soon %}<div class="hf-tile-badges"><span class="hf-soon">Coming soon</span></div>{% endif %}
         </div>
         <div class="hf-tile-cap">
           <div class="hf-tile-name">{{ t.name }}</div>
           <div class="hf-tile-desc">{{ t.desc }}</div>
         </div>
+      {%- if soon %}
+      </div>
+      {%- else %}
       </a>
+      {%- endif %}
       {%- endfor %}
     </div>
   </div>

@@ -111,7 +111,7 @@
         {%- if _path.startswith('/admin') %}
         <nav class="hf-subnav" aria-label="Admin">
           <div class="hf-subnav-inner">
-            {%- for href, label in [('/admin','Overview'), ('/admin/branding','Branding'), ('/admin/server','Server & Queue'), ('/admin/users','Users')] %}
+            {%- for href, label in [('/admin','Overview'), ('/admin/tools','Tools'), ('/admin/branding','Branding'), ('/admin/server','Server & Queue'), ('/admin/users','Users')] %}
             <a href="{{ href }}" class="hf-subtab{% if _path == href %} active{% endif %}"{% if _path == href %} aria-current="page"{% endif %}>{{ label }}</a>
             {%- endfor %}
           </div>

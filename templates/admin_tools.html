@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Tools – {{ settings.app_name }}{% endblock %}
+{% block content %}
+{%- set tools = all_tools(settings) %}
+{%- set icons = {
+  'enabled': '<path d="M20 6 9 17l-5-5"/>',
+  'new': '<path d="M12 3l1.9 5.8L20 10l-6.1 1.2L12 17l-1.9-5.8L4 10l6.1-1.2L12 3Z"/>',
+  'coming_soon': '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  'disabled': '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
+} %}
+<div class="max-w-6xl mx-auto px-4 py-10">
+  <h1 class="text-3xl font-bold tracking-tight">Tools</h1>
+  <p class="text-slate-500 dark:text-slate-400 mt-1">Choose which tools people can see and use on the landing page and in Create.</p>
+
+  <div class="hf-tools-toolbar">
+    <div class="hf-tools-legend">
+      <span><b>✓ Enabled</b> — shown, usable</span>
+      <span><b>✦ New</b> — shown with a New badge</span>
+      <span><b>◷ Coming soon</b> — shown, can’t be used</span>
+      <span><b>⊘ Disabled</b> — hidden, can’t be used</span>
+    </div>
+    <div class="flex gap-2">
+      <button type="button" class="hf-btn hf-btn-outline" data-bulk="enabled">Enable all</button>
+      <button type="button" class="hf-btn hf-btn-outline" data-bulk="reset">Reset changes</button>
+    </div>
+  </div>
+
+  <form id="tools-form">
+    {%- for c in TOOL_CATEGORIES %}
+    <section class="hf-tools-cat">
+      <h2>{{ c.name }}</h2>
+      <div class="hf-tools-list">
+        {%- for t in tools if t.cat == c.id %}
+        <div class="hf-tool-row" data-tool="{{ t.id }}" data-status="{{ t.status }}" data-saved="{{ t.status }}">
+          <img src="{{ asset('img/cards/' ~ t.id ~ '.jpg') }}" alt="" loading="lazy" />
+          <div class="hf-tool-meta">
+            <p>{{ t.name }} <code>{{ t.id }}</code></p>
+            <p>{{ t.desc }}</p>
+          </div>
+          <div class="hf-status" role="radiogroup" aria-label="Status for {{ t.name }}">
+            {%- for st in TOOL_STATUSES %}
+            <label title="{{ TOOL_STATUS_LABELS[st] }}">
+              <input type="radio" name="{{ t.id }}" value="{{ st }}" {% if t.status == st %}checked{% endif %}
+                     aria-label="{{ TOOL_STATUS_LABELS[st] }}" />
+              <span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icons[st]|safe }}</svg></span>
+            </label>
+            {%- endfor %}
+          </div>
+        </div>
+        {%- endfor %}
+      </div>
+    </section>
+    {%- endfor %}
+
+    <div class="hf-savebar">
+      <p id="tools-summary"></p>
+      <button type="submit" id="tools-save" class="hf-btn hf-btn-accent" disabled>Save changes</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+if (!requireAdmin()) throw new Error('admin');
+
+const LABELS = {{ TOOL_STATUS_LABELS|tojson }};
+const rows = [...document.querySelectorAll('.hf-tool-row')];
+const saveBtn = document.getElementById('tools-save');
+
+function currentOf(row) {
+  return row.querySelector('input:checked')?.value || row.dataset.saved;
+}
+
+function refresh() {
+  const counts = { enabled: 0, new: 0, coming_soon: 0, disabled: 0 };
+  let dirty = 0;
+  rows.forEach(row => {
+    const st = currentOf(row);
+    counts[st] = (counts[st] || 0) + 1;
+    row.dataset.status = st;
+    const changed = st !== row.dataset.saved;
+    row.classList.toggle('is-dirty', changed);
+    if (changed) dirty++;
+  });
+  const usable = counts.enabled + counts.new;
+  document.getElementById('tools-summary').textContent =
+    `${usable} usable · ${counts.new} new · ${counts.coming_soon} coming soon · ${counts.disabled} disabled`
+    + (dirty ? ` — ${dirty} unsaved change${dirty === 1 ? '' : 's'}` : '');
+  saveBtn.disabled = dirty === 0;
+}
+
+document.getElementById('tools-form').addEventListener('change', refresh);
+
+document.querySelectorAll('[data-bulk]').forEach(btn => btn.addEventListener('click', () => {
+  rows.forEach(row => {
+    const target = btn.dataset.bulk === 'reset' ? row.dataset.saved : 'enabled';
+    // "Enable all" keeps New badges; it only switches off Coming soon / Disabled.
+    if (btn.dataset.bulk === 'enabled' && currentOf(row) === 'new') return;
+    const input = row.querySelector(`input[value="${target}"]`);
+    if (input) input.checked = true;
+  });
+  refresh();
+}));
+
+document.getElementById('tools-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const tool_status = {};
+  rows.forEach(row => { tool_status[row.dataset.tool] = currentOf(row); });
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
+  try {
+    await API.put('/api/admin/tools', { tool_status });
+    rows.forEach(row => { row.dataset.saved = currentOf(row); });
+    toast('Tool settings saved', 'success');
+  } catch (err) {
+    toast(err.message || 'Save failed', 'error');
+  }
+  saveBtn.textContent = 'Save changes';
+  refresh();
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if (rows.some(r => currentOf(r) !== r.dataset.saved)) { e.preventDefault(); e.returnValue = ''; }
+});
+
+refresh();
+</script>
+{% endblock %}

@@ -360,7 +360,7 @@ function initCardMotion() {
     const MAX = 7; // degrees
     tiles.forEach(t => {
       const media = t.querySelector('.hf-tile-media');
-      if (!media) return;
+      if (!media || t.classList.contains('is-soon')) return;  // not actionable
       let raf = 0;
       t.addEventListener('pointermove', (e) => {
         const r = media.getBoundingClientRect();
