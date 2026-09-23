@@ -316,9 +316,91 @@ function renderStudioNav() {
   }
 }
 
+
+// ─── Card motion ─────────────────────────────────────────────────────────
+// Staggered reveal as tool cards scroll into view, a pointer-following tilt
+// and sheen on hover, and a re-reveal when a category filter changes.
+// Skipped entirely for prefers-reduced-motion; tilt only on fine pointers.
+const HF_REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const HF_FINE = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+let hfRevealObserver = null;
+
+function revealTiles(tiles) {
+  if (HF_REDUCED || !hfRevealObserver) return;
+  // Stagger by position within the batch that enters together.
+  tiles.forEach((t, n) => {
+    t.classList.remove('hf-in');
+    t.classList.add('hf-pre');
+    t.style.setProperty('--i', String(n % 12));
+    hfRevealObserver.observe(t);
+  });
+}
+
+function initCardMotion() {
+  const tiles = [...document.querySelectorAll('.hf-tile')];
+  if (!tiles.length) return;
+
+  if (!HF_REDUCED && 'IntersectionObserver' in window) {
+    document.documentElement.classList.add('hf-motion');
+    hfRevealObserver = new IntersectionObserver((entries) => {
+      // Number the cards arriving in this batch so each row cascades.
+      let n = 0;
+      entries.forEach(e => {
+        if (!e.isIntersecting) return;
+        const t = e.target;
+        t.style.setProperty('--i', String(n++));
+        requestAnimationFrame(() => { t.classList.add('hf-in'); t.classList.remove('hf-pre'); });
+        hfRevealObserver.unobserve(t);
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.12 });
+    revealTiles(tiles);
+  }
+
+  if (!HF_REDUCED && HF_FINE) {
+    const MAX = 7; // degrees
+    tiles.forEach(t => {
+      const media = t.querySelector('.hf-tile-media');
+      if (!media) return;
+      let raf = 0;
+      t.addEventListener('pointermove', (e) => {
+        const r = media.getBoundingClientRect();
+        const px = (e.clientX - r.left) / r.width;   // 0..1
+        const py = (e.clientY - r.top) / r.height;
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+          t.classList.add('is-tilting');
+          media.style.setProperty('--ry', ((px - .5) * 2 * MAX).toFixed(2) + 'deg');
+          media.style.setProperty('--rx', ((.5 - py) * 2 * MAX).toFixed(2) + 'deg');
+          media.style.setProperty('--mx', (px * 100).toFixed(1) + '%');
+          media.style.setProperty('--my', (py * 100).toFixed(1) + '%');
+        });
+      });
+      t.addEventListener('pointerleave', () => {
+        cancelAnimationFrame(raf);
+        t.classList.remove('is-tilting');
+        media.style.setProperty('--rx', '0deg');
+        media.style.setProperty('--ry', '0deg');
+      });
+    });
+  }
+
+  // Category filters (landing + Generate): re-reveal whatever is now shown.
+  document.querySelectorAll('.hf-chip[data-filter]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      // The page's own handler toggles [hidden] first; read the result next frame.
+      requestAnimationFrame(() => {
+        const grid = chip.closest('section, #picker')?.querySelector('.hf-tile-grid');
+        const shown = [...(grid || document).querySelectorAll('.hf-tile')].filter(t => !t.hidden);
+        revealTiles(shown);
+      });
+    });
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   renderStudioNav();
+  initCardMotion();
   initLoginModal();
   initRegisterModal();
 });
