@@ -1,8 +1,7 @@
 /* ──────────────────────────────────────────────────────────────────────────
-   Studio design system — landing + Generate.
-   Scoped under html.studio (set before first paint in base.html) so the
-   sidebar pages (Jobs, Library, Admin) are untouched. Brand colour comes from
-   Admin → Branding via --brand / --brand-ink / --brand-text.
+   Studio design system — every page.
+   Scoped under html.studio (set before first paint in base.html). Brand
+   colour comes from Admin → Branding via --brand / --brand-ink / --brand-text.
    Specificity note: the Tailwind CDN injects its sheet after this one, so
    overrides of Tailwind-styled elements use two-class selectors.
    ────────────────────────────────────────────────────────────────────────── */
@@ -514,4 +513,190 @@ html.studio .hf-composer #prompt::placeholder { color: var(--hf-dim); }
   .hf-hero-col, .hf-feed-item.is-running::after { animation: none !important; }
   .hf-tile-media, .hf-tile-media img, .type-check, #step-two, #selected-bar { transition: none !important; animation: none !important; }
   .hf-tile:hover .hf-tile-media, .hf-tile:hover .hf-tile-media img { transform: none; }
+}
+
+/* ── Admin sub-nav ────────────────────────────────────────────────────── */
+.hf-subnav { border-bottom: 1px solid var(--hf-border); background: var(--hf-bg); }
+.hf-subnav-inner {
+  max-width: 1480px; margin: 0 auto; padding: 0 16px;
+  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
+}
+.hf-subnav-inner::-webkit-scrollbar { display: none; }
+@media (min-width: 768px) { .hf-subnav-inner { padding: 0 28px; } }
+.hf-subtab {
+  flex: none; position: relative;
+  padding: 14px 12px; font-size: 14px; font-weight: 500; color: var(--hf-muted);
+  transition: color .15s ease;
+}
+.hf-subtab:hover { color: var(--hf-text); }
+.hf-subtab.active { color: var(--hf-text); font-weight: 600; }
+.hf-subtab.active::after {
+  content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px;
+  border-radius: 2px; background: var(--hf-accent);
+}
+.hf-subtab:focus-visible { outline: 2px solid var(--hf-accent); outline-offset: -2px; border-radius: 8px; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Theme layer for the utility-class pages (Jobs, Library, Admin).
+   Those templates are built from Tailwind slate utilities. Rather than
+   rewriting their markup (and the JS that renders it), map the utilities
+   onto the studio tokens. Each rule lists the light class and its dark:
+   pair together because the tokens already switch with the theme.
+   Selectors start with `html.studio` so they outrank Tailwind's own
+   (`.x` and `.dark .dark\:x`) regardless of load order.
+   ────────────────────────────────────────────────────────────────────── */
+
+/* Page frame */
+html.studio main > .max-w-6xl { max-width: 1480px; padding-left: 16px; padding-right: 16px; }
+@media (min-width: 768px) { html.studio main > .max-w-6xl { padding-left: 28px; padding-right: 28px; } }
+html.studio main > .max-w-6xl.py-10 { padding-top: 36px; padding-bottom: 64px; }
+html.studio main h1.text-3xl {
+  font-family: var(--hf-display); font-weight: 900; text-transform: uppercase;
+  letter-spacing: -.035em; line-height: .95; font-size: clamp(30px, 4vw, 52px);
+}
+html.studio main h1.text-3xl + p { margin-top: 8px; }
+
+/* Surfaces */
+html.studio .bg-white,
+html.studio .dark\:bg-slate-900,
+html.studio .dark\:bg-slate-900\/60,
+html.studio .dark\:bg-slate-900\/80 { background-color: var(--hf-surface); }
+html.studio .bg-slate-50,
+html.studio .bg-slate-100,
+html.studio .dark\:bg-slate-950,
+html.studio .dark\:bg-slate-800,
+html.studio .dark\:bg-slate-800\/50,
+html.studio .dark\:bg-slate-800\/80,
+html.studio .dark\:bg-slate-950\/50 { background-color: var(--hf-surface-2); }
+html.studio .bg-slate-200,
+html.studio .bg-slate-200\/80 { background-color: var(--hf-surface-3); }
+html.studio .bg-slate-900.text-slate-100 { background-color: #0b0b0d; color: #e4e4e7; } /* code blocks */
+
+/* Hover surfaces */
+html.studio .hover\:bg-slate-50:hover,
+html.studio .hover\:bg-slate-100:hover,
+html.studio .dark\:hover\:bg-slate-800:hover { background-color: var(--hf-surface-3); }
+
+/* Borders & dividers */
+html.studio .border-slate-100,
+html.studio .border-slate-200,
+html.studio .border-slate-200\/80,
+html.studio .dark\:border-slate-800 { border-color: var(--hf-border); }
+html.studio .border-slate-300,
+html.studio .dark\:border-slate-700 { border-color: var(--hf-border-strong); }
+html.studio .divide-slate-100 > * + *,
+html.studio .dark\:divide-slate-800 > * + * { border-color: var(--hf-border); }
+html.studio .hover\:border-brand\/40:hover,
+html.studio .hover\:border-brand\/50:hover { border-color: var(--hf-accent); }
+
+/* Text */
+html.studio .text-slate-900,
+html.studio .dark\:text-slate-100,
+html.studio .dark\:text-slate-200,
+html.studio .text-slate-800 { color: var(--hf-text); }
+html.studio .text-slate-500,
+html.studio .text-slate-600,
+html.studio .dark\:text-slate-300,
+html.studio .dark\:text-slate-400 { color: var(--hf-muted); }
+html.studio .text-slate-400 { color: var(--hf-dim); }
+html.studio .hover\:text-brand:hover,
+html.studio .group:hover .group-hover\:text-brand { color: var(--hf-accent-text); }
+
+/* Cards: a touch larger radius and a quieter hover shadow */
+html.studio main .rounded-2xl { border-radius: 20px; }
+html.studio main .rounded-xl.border { border-radius: 14px; }
+html.studio .hover\:shadow-lg:hover,
+html.studio .hover\:shadow-xl:hover { box-shadow: var(--hf-shadow); }
+
+/* Primary buttons: solid accent instead of the old gradient */
+html.studio .btn-brand {
+  background: var(--hf-accent); color: var(--hf-accent-ink);
+  border-radius: 999px;
+}
+html.studio .btn-brand:hover { filter: brightness(1.06); }
+html.studio main a.rounded-xl.border,
+html.studio main button.rounded-xl.border,
+html.studio main button.rounded-lg.border,
+html.studio main a.rounded-lg.border { border-radius: 999px; }
+
+/* Form controls */
+html.studio main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+html.studio main select,
+html.studio main textarea {
+  background-color: var(--hf-surface-2);
+  color: var(--hf-text);
+  border-color: var(--hf-border-strong);
+}
+html.studio main input::placeholder,
+html.studio main textarea::placeholder { color: var(--hf-dim); }
+html.studio main input:focus,
+html.studio main select:focus,
+html.studio main textarea:focus {
+  outline: none; border-color: var(--hf-accent);
+  box-shadow: 0 0 0 3px var(--hf-accent-soft);
+}
+html.studio main input[type="checkbox"],
+html.studio main input[type="radio"],
+html.studio main input[type="range"] { accent-color: var(--hf-accent); }
+html.studio main input[type="color"] {
+  padding: 3px; background: var(--hf-surface-2);
+  border: 1px solid var(--hf-border-strong); border-radius: 12px;
+}
+html.studio main input[type="file"] { color: var(--hf-muted); font-size: 13px; }
+html.studio main input[type="file"]::file-selector-button {
+  margin-right: 10px; padding: 7px 12px; border: 0; border-radius: 999px;
+  background: var(--hf-text); color: var(--hf-bg); font-weight: 600; font-size: 12px; cursor: pointer;
+}
+html.studio main details > summary { cursor: pointer; }
+
+/* Tables (Admin → Users) */
+html.studio main table thead { background: var(--hf-surface-2); }
+html.studio main table th {
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--hf-dim);
+}
+
+/* Library filter segment */
+html.studio .filter-btn { color: var(--hf-muted); transition: background .15s ease, color .15s ease; }
+html.studio .filter-btn:hover { color: var(--hf-text); }
+html.studio .filter-btn.active,
+html.studio .filter-btn.bg-brand,
+html.studio .filter-btn[aria-pressed="true"],
+html.studio .filter-btn.btn-brand { background: var(--hf-text); color: var(--hf-bg); border-radius: 0; filter: none; }
+
+/* Drawers and modals (job details, library item, pickers, auth) */
+html.studio .fixed .max-w-lg.bg-white,
+html.studio .fixed .max-w-md.bg-white,
+html.studio .fixed .max-w-3xl.bg-white,
+html.studio #login-modal .bg-white,
+html.studio #register-modal .bg-white {
+  background: var(--hf-surface);
+  border-color: var(--hf-border-strong);
+}
+html.studio #login-modal input,
+html.studio #register-modal input {
+  background: var(--hf-surface-2); color: var(--hf-text); border-color: var(--hf-border-strong);
+}
+html.studio #login-modal .btn-brand,
+html.studio #register-modal .btn-brand { border-radius: 999px; }
+
+/* Result media on Jobs keeps a dark stage in both themes */
+html.studio .result-media { border-color: var(--hf-border); }
+
+/* Drawers and modals sit above the fixed top nav (z 60). */
+html.studio .fixed.inset-0.z-50 { z-index: 70; }
+
+/* Mobile nav: fade the tab strip's edge so it reads as scrollable. */
+@media (max-width: 640px) {
+  .hf-tabs {
+    -webkit-mask-image: linear-gradient(to right, #000 82%, transparent);
+            mask-image: linear-gradient(to right, #000 82%, transparent);
+    padding-right: 24px;
+  }
+}
+
+/* Library tiles whose media file is missing */
+html.studio .hf-media-missing {
+  display: grid; place-items: center; height: 10rem;
+  background: var(--hf-surface-2); color: var(--hf-dim); font-size: 12px;
 }

@@ -68,13 +68,24 @@ function statCard(label, value) {
   </div>`;
 }
 
+// The file behind a library item can disappear from the server (cleanup,
+// moved outputs). Show a quiet placeholder instead of a broken image.
+function mediaMissing(el) {
+  const d = document.createElement('div');
+  d.className = 'hf-media-missing';
+  d.textContent = 'File unavailable';
+  el.replaceWith(d);
+}
+
 function tile(it) {
   const media = it.media_type === 'video'
     ? `<video src="${it.url}" class="w-full h-40 object-cover bg-black" muted
-              onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0"></video>`
+              onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0"
+              onerror="mediaMissing(this)"></video>`
     : it.media_type === 'audio'
       ? `<div class="w-full h-40 flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-4xl">🎵</div>`
-      : `<img src="${it.url}" loading="lazy" class="w-full h-40 object-cover bg-slate-50 dark:bg-slate-950" />`;
+      : `<img src="${it.url}" loading="lazy" class="w-full h-40 object-cover bg-slate-50 dark:bg-slate-950"
+             onerror="mediaMissing(this)" />`;
   return `<div class="group rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:shadow-lg transition">
     <div class="relative cursor-pointer" onclick="openDrawer('${it.id}')">
       ${media}

@@ -1,5 +1,5 @@
 /**
- * Opensource Generative AI client – auth, theme, sidebar, helpers
+ * Opensource Generative AI client – auth, theme, top nav, helpers
  */
 const TOKEN_KEY = 'genai_token';
 const USER_KEY = 'genai_user';
@@ -72,73 +72,6 @@ function initTheme() {
 function toggleTheme() {
   const isDark = document.documentElement.classList.toggle('dark');
   localStorage.setItem('theme', isDark ? 'dark' : 'light');
-}
-
-function navLink(href, label, icon) {
-  const active = location.pathname === href || (href !== '/' && location.pathname.startsWith(href));
-  return `<a href="${href}" class="sidebar-link flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition ${active ? 'active' : ''}">
-    <span class="opacity-70">${icon || '•'}</span><span>${label}</span>
-  </a>`;
-}
-
-function renderNav() {
-  const side = document.getElementById('sidebar-nav');
-  const sideAuth = document.getElementById('sidebar-auth');
-  const authArea = document.getElementById('auth-area');
-  const user = getUser();
-  const path = location.pathname;
-
-  const icons = {
-    home: '🏠',
-    gen: '✨',
-    jobs: '📋',
-    library: '🗂️',
-    admin: '⚙️',
-    brand: '🎨',
-    server: '🖥️',
-    users: '👥',
-  };
-
-  if (side) {
-    let html = navLink('/', 'Home', icons.home);
-    if (user) {
-      html += navLink('/generate', 'Generate', icons.gen);
-      html += navLink('/jobs', 'My Jobs', icons.jobs);
-      html += navLink('/library', 'Library', icons.library);
-      if (user.role === 'admin') {
-        html += `<div class="pt-3 pb-1 px-3 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Admin</div>`;
-        html += navLink('/admin', 'Dashboard', icons.admin);
-        html += navLink('/admin/branding', 'Branding', icons.brand);
-        html += navLink('/admin/server', 'Server & Queue', icons.server);
-        html += navLink('/admin/users', 'Users', icons.users);
-      }
-    } else {
-      html += `<a href="/?login=1" class="sidebar-link flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"><span>→</span><span>Log in</span></a>`;
-      html += `<a href="/?register=1" class="sidebar-link flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"><span>+</span><span>Sign up</span></a>`;
-    }
-    side.innerHTML = html;
-  }
-
-  if (sideAuth) {
-    if (user) {
-      sideAuth.innerHTML = `
-        <div class="px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/80">
-          <p class="font-medium truncate text-sm">${escapeHtml(user.name || user.email)}</p>
-          <p class="text-[11px] text-slate-500 truncate">${escapeHtml(user.email || '')} · ${user.role}</p>
-        </div>
-        <button type="button" onclick="logout()" class="w-full mt-2 text-sm px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Log out</button>
-      `;
-    } else {
-      sideAuth.innerHTML = `
-        <a href="/?login=1" class="block text-center text-sm px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 mb-2">Log in</a>
-        <a href="/?register=1" class="block text-center text-sm px-3 py-2 rounded-lg btn-brand">Sign up</a>
-      `;
-    }
-  }
-
-  if (authArea) {
-    authArea.innerHTML = '';
-  }
 }
 
 function logout() {
@@ -330,32 +263,6 @@ function typeLabel(t) {
   return map[t] || t;
 }
 
-function isLandingPage() {
-  const p = (location.pathname || '/').replace(/\/$/, '') || '/';
-  return p === '/';
-}
-
-// Landing + Generate use the top-nav "studio" shell; everything else keeps the
-// sidebar. The <html> class is set before first paint in base.html.
-function isStudioPage() {
-  return document.documentElement.classList.contains('studio');
-}
-
-function applyLayoutMode() {
-  const studio = isStudioPage();
-  document.body.classList.toggle('is-landing', isLandingPage());
-  const main = document.getElementById('main-column');
-  if (main) main.classList.toggle('md:pl-64', !studio);
-  const sidebar = document.getElementById('sidebar');
-  if (studio) {
-    sidebar?.classList.add('hidden');
-    sidebar?.classList.remove('flex');
-  } else if (window.matchMedia('(min-width: 768px)').matches) {
-    sidebar?.classList.remove('hidden');
-    sidebar?.classList.add('flex');
-  }
-}
-
 function renderStudioNav() {
   const tabs = document.getElementById('studio-nav-tabs');
   const auth = document.getElementById('studio-nav-auth');
@@ -371,6 +278,8 @@ function renderStudioNav() {
     const on = href === '/' ? path === '/' : path.startsWith(href);
     return `<a href="${href}" class="hf-tab${on ? ' active' : ''}"${on ? ' aria-current="page"' : ''}>${label}</a>`;
   }).join('');
+  // On narrow screens the strip scrolls; bring the current tab into view.
+  tabs.querySelector('.hf-tab.active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
 
   if (user) {
     const name = user.name || user.email || '';
@@ -407,33 +316,9 @@ function renderStudioNav() {
   }
 }
 
-function initSidebarMobile() {
-  const sidebar = document.getElementById('sidebar');
-  const overlay = document.getElementById('sidebar-overlay');
-  const openBtn = document.getElementById('mobile-menu-btn');
-  const open = () => {
-    if (isStudioPage()) return;
-    sidebar?.classList.remove('hidden');
-    sidebar?.classList.add('flex');
-    overlay?.classList.remove('hidden');
-  };
-  const close = () => {
-    if (window.matchMedia('(min-width: 768px)').matches && !isStudioPage()) return;
-    sidebar?.classList.add('hidden');
-    sidebar?.classList.remove('flex');
-    overlay?.classList.add('hidden');
-  };
-  openBtn?.addEventListener('click', open);
-  overlay?.addEventListener('click', close);
-}
-
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
-  applyLayoutMode();
-  document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
-  renderNav();
   renderStudioNav();
-  initSidebarMobile();
   initLoginModal();
   initRegisterModal();
 });
