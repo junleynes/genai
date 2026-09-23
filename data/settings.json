@@ -35,6 +35,7 @@
   "default_model_daynight": "ltx2_22B_distilled_1_1",
   "default_model_colorize": "ltx2_22B_distilled_1_1",
   "default_model_upscale": "ltx2_22B_distilled_1_1",
+  "default_model_foley": "ltx2_22B_distilled_1_1",
   "default_model_t2i": "",
   "default_model_i2i": "",
   "default_model_cs": "",
@@ -48,12 +49,12 @@
   "default_loras_cs": "",
   "default_loras_ingredients": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors:1.0",
   "default_loras_outpaint": "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors:1.0",
-  "default_loras_cleanplate": "ltx-2.3-22b-ic-lora-clean-plate-0.9.safetensors:1.0",
-  "default_loras_relight": "ltx-2.3-22b-ic-lora-relight-0.9.safetensors:1.0",
+  "default_loras_cleanplate": "ltx-2.3-22b-ic-lora-clean-plate-1.0.safetensors:1.0",
+  "default_loras_relight": "ltx-2.3-22b-ic-lora-relight-1.0.safetensors:1.0",
   "default_loras_daynight": "ltx-2.3-22b-ic-lora-day-to-night-0.9.safetensors:1.0",
   "default_loras_colorize": "ltx-2.3-22b-ic-lora-colorization-0.9.safetensors:1.0",
   "default_loras_upscale": "ltx-2.3-22b-ic-lora-pixel-spatial-upscaler-x2-0.9.safetensors:1.0",
-  "default_loras_foley": "ltx-2.3-22b-lora-foley-v2a.safetensors:1.0",
+  "default_loras_foley": "ltx-2.3-22b-lora-foley-v2a-1.0.safetensors:1.0",
   "default_loras_fs": "head_swap_v3_rank_adaptive_fro_098.safetensors:1.0",
   "default_loras_msr": ""
 }

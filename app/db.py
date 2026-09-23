@@ -90,7 +90,7 @@ DEFAULT_SETTINGS = {
     "default_model_daynight": "ltx2_22B_distilled_1_1",
     "default_model_colorize": "ltx2_22B_distilled_1_1",
     "default_model_upscale": "ltx2_22B_distilled_1_1",
-    "default_model_foley": "",
+    "default_model_foley": "ltx2_22B_distilled_1_1",
     # Default LoRAs per job type, "filename:weight, ..." — applied when the
     # user supplied none, so Easy mode never has to think about LoRAs.
     # Prefer exact WanGP filenames; keywords also resolve (see generation).
@@ -108,12 +108,12 @@ DEFAULT_SETTINGS = {
     # LTX-2.3 Creative Lab IC-LoRAs
     "default_loras_ingredients": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors:1.0",
     "default_loras_outpaint": "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors:1.0",
-    "default_loras_cleanplate": "ltx-2.3-22b-ic-lora-clean-plate-0.9.safetensors:1.0",
-    "default_loras_relight": "ltx-2.3-22b-ic-lora-relight-0.9.safetensors:1.0",
+    "default_loras_cleanplate": "ltx-2.3-22b-ic-lora-clean-plate-1.0.safetensors:1.0",
+    "default_loras_relight": "ltx-2.3-22b-ic-lora-relight-1.0.safetensors:1.0",
     "default_loras_daynight": "ltx-2.3-22b-ic-lora-day-to-night-0.9.safetensors:1.0",
     "default_loras_colorize": "ltx-2.3-22b-ic-lora-colorization-0.9.safetensors:1.0",
     "default_loras_upscale": "ltx-2.3-22b-ic-lora-pixel-spatial-upscaler-x2-0.9.safetensors:1.0",
-    "default_loras_foley": "ltx-2.3-22b-lora-foley-v2a.safetensors:1.0",
+    "default_loras_foley": "ltx-2.3-22b-lora-foley-v2a-1.0.safetensors:1.0",
     "default_resolution": "1280x704",
     "default_steps": 8,
     "default_fps": "24",
