@@ -60,8 +60,9 @@ function statusBadge(s) {
 function modelLabel(j) {
   const p = j.params || {};
   const mt = p.model_type || p.model || '';
-  if (!mt || mt === 'auto') return 'Auto / default';
-  return mt;
+  const ran = j.resolved_model_type;
+  if (!mt || mt === 'auto') return ran ? `Auto → ${ran}` : 'Auto / default';
+  return ran && ran !== mt ? `${mt} → ${ran}` : mt;
 }
 
 function paramChips(j) {
@@ -70,6 +71,8 @@ function paramChips(j) {
   chips.push(j.job_type || '?');
   if (j.mode) chips.push(j.mode);
   chips.push('model: ' + modelLabel(j));
+  if (j.resolved_loras && j.resolved_loras.length) chips.push('LoRA: ' + j.resolved_loras.map(n => String(n).split('/').pop().replace(/\.safetensors$/, '')).join(', '));
+  if (j.dropped_loras && j.dropped_loras.length) chips.push('skipped (not installed): ' + j.dropped_loras.map(n => String(n).split('/').pop()).join(', '));
   if (p.resolution) chips.push(String(p.resolution));
   if (p.steps) chips.push(p.steps + ' steps');
   if (p.duration_seconds) chips.push(p.duration_seconds + 's');
@@ -146,7 +149,7 @@ function renderJobCard(j) {
 // innerHTML replace would recreate <video> elements every 4s and restart
 // playback even for jobs that finished long ago.
 function jobSignature(j) {
-  return JSON.stringify([j.status, j.progress, j.result_url, j.error, j.title, j.prompt, j.credits && j.credits.status]);
+  return JSON.stringify([j.status, j.progress, j.result_url, j.error, j.title, j.prompt, j.credits && j.credits.status, j.resolved_model_type, j.resolved_loras]);
 }
 
 let jobOrder = [];

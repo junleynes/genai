@@ -134,7 +134,21 @@ def _is_ltx2_family(model_type: str, name: str = "", family: str = "") -> bool:
     return any(k in blob for k in ("ltx2", "ltx-2", "ltx_2"))
 
 
-def _pick_control_model(mcp_url: str, requested: str | None = None) -> Optional[str]:
+def _same_family_first(capable: list[dict], anchor: str | None) -> list[dict]:
+    """When the install's configured default for this job type is LTX-2,
+    keep Auto inside LTX-2 whenever an LTX-2 candidate exists. LoRAs and
+    defaults are configured for that family; hopping to a Wan/VACE model
+    changes the LoRA folder WanGP looks in and fails the job."""
+    if anchor and _is_ltx2_family(anchor):
+        same = [m for m in capable if _is_ltx2_family(
+            str(m.get("model_type") or ""), str(m.get("name") or ""), str(m.get("family") or ""))]
+        if same:
+            return same
+    return capable
+
+
+def _pick_control_model(mcp_url: str, requested: str | None = None,
+                        anchor: str | None = None) -> Optional[str]:
     """
     Choose a guide-capable model for pose/control-driven jobs. Returns
     None if the catalogue has none, so the caller can fail with a clear
@@ -152,6 +166,8 @@ def _pick_control_model(mcp_url: str, requested: str | None = None) -> Optional[
     ]
     if not capable:
         return None
+    if not requested:
+        capable = _same_family_first(capable, anchor)
 
     # Honour an explicit request when it is genuinely capable.
     if requested:
@@ -178,6 +194,7 @@ def _pick_control_model(mcp_url: str, requested: str | None = None) -> Optional[
 def _pick_pose_identity_model(
     mcp_url: str,
     requested: str | None = None,
+    anchor: str | None = None,
 ) -> Optional[str]:
     """
     Model that can BOTH follow a driving video AND honour a reference image
@@ -199,6 +216,8 @@ def _pick_pose_identity_model(
     ]
     if not capable:
         return None
+    if not requested:
+        capable = _same_family_first(capable, anchor)
 
     if requested:
         for m in capable:
@@ -434,7 +453,31 @@ def _normalize_lora_list(raw: Any) -> list[dict]:
     return out
 
 
+# Last successful LoRA listing per (server, model). WanGP can be slow to
+# answer tool calls while it is generating; a timed-out listing must not make
+# a job fall back to bare default filenames that WanGP then rejects when the
+# real file sits in a subfolder of its LoRA directory.
+_LORA_LIST_CACHE: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+_LORA_LIST_CACHE_TTL_S = 6 * 3600
+
+
 def list_loras_for_model(mcp_url: str, model_type: str = "") -> tuple[list[dict], bool]:
+    loras, supported = _list_loras_live(mcp_url, model_type)
+    key = (mcp_url, model_type or "")
+    if loras:
+        _LORA_LIST_CACHE[key] = (time.time(), loras)
+        return loras, supported
+    cached = _LORA_LIST_CACHE.get(key)
+    if supported and cached and time.time() - cached[0] < _LORA_LIST_CACHE_TTL_S:
+        logger.warning(
+            "LoRA listing for %s came back empty; using the last good list (%d LoRAs)",
+            model_type or "(any)", len(cached[1]),
+        )
+        return list(cached[1]), True
+    return loras, supported
+
+
+def _list_loras_live(mcp_url: str, model_type: str = "") -> tuple[list[dict], bool]:
     """
     LoRAs available for a model. WanGP keeps LoRAs in model-specific
     subdirectories under loras/, so the set is not global — a LoRA built
@@ -619,6 +662,56 @@ def _resolve_lora_against_catalog(
                     break
         resolved.append(hit or req)
     return resolved
+
+
+# ── WanGP LTX-2 system LoRAs ────────────────────────────────────────────────
+# WanGP attaches some LTX-2 IC-LoRAs by itself when the feature that needs
+# them is requested, downloading them on first use (models/ltx2/ltx2.py,
+# _append_system_lora). Naming one in activated_loras is only valid when the
+# file is actually in the server's LoRA folder — otherwise WanGP rejects the
+# whole job ("Loras files are missing or invalid"). Each entry: filename
+# signature → predicate on the outgoing settings that says WanGP will add it.
+_LTX2_SYSTEM_LORAS: dict[str, Any] = {
+    # Pose / pose-align / depth / canny control
+    "union-control": lambda st: any(c in str(st.get("video_prompt_type") or "") for c in "OPDE"),
+    # Reference-voice workflow
+    "id-lora-celebvhq": lambda st: "1" in str(st.get("audio_prompt_type") or ""),
+}
+
+
+def _drop_auto_system_loras(source: dict, catalog: list, job_id: Any = None) -> None:
+    """Remove system LoRAs WanGP will add itself and that aren't installed
+    as regular LoRAs. Installed copies are kept: WanGP then uses them in
+    place of its default, with our multiplier."""
+    loras = list(source.get("activated_loras") or [])
+    if not loras or not _is_ltx2_family(str(source.get("model_type") or "")):
+        return
+    installed = set()
+    for item in catalog or []:
+        n = (str(item.get("name") or item.get("path") or item.get("file") or "")
+             if isinstance(item, dict) else str(item))
+        if n:
+            installed.add(n.replace("\\", "/").split("/")[-1].lower())
+    raw_m = source.get("loras_multipliers")
+    m_is_str = isinstance(raw_m, str)
+    mults = raw_m.split() if m_is_str else list(raw_m or [])
+    keep_l, keep_m = [], []
+    for i, name in enumerate(loras):
+        base = str(name).replace("\\", "/").split("/")[-1].lower()
+        sig = next((k for k in _LTX2_SYSTEM_LORAS if k in base), None)
+        if sig and base not in installed and _LTX2_SYSTEM_LORAS[sig](source):
+            logger.info(
+                "Job %s: '%s' is a WanGP system LoRA and isn't in the server's "
+                "LoRA folder — letting WanGP attach its own", job_id, name,
+            )
+            continue
+        keep_l.append(name)
+        if i < len(mults):
+            keep_m.append(mults[i])
+    if len(keep_l) != len(loras):
+        source["activated_loras"] = keep_l
+        if "loras_multipliers" in source:
+            source["loras_multipliers"] = " ".join(keep_m) if m_is_str else keep_m
 
 
 def _build_character_sheet_prompt(prompt: str, params: dict) -> tuple[str, str]:
@@ -1567,6 +1660,10 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
     # video_guide/video_prompt_type and then ignores them — the job succeeds
     # but the output never follows the pose. Resolve to a capable model here,
     # or fail loudly rather than silently returning unguided video.
+    _family_anchor = (
+        settings_cfg.get(f"default_model_{job.get('job_type', 't2v')}")
+        or settings_cfg.get("default_model_type") or ""
+    )
     if source.get("video_guide"):
         params = job.get("params") or {}
         requested = params.get("model_type") or params.get("model")
@@ -1574,7 +1671,8 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         current = str(source.get("model_type") or "")
 
         if not _is_control_capable(current):
-            picked = _pick_control_model(mcp_url, requested if explicit else None)
+            picked = _pick_control_model(mcp_url, requested if explicit else None,
+                                         anchor=_family_anchor)
             if picked and picked != current:
                 if explicit:
                     raise RuntimeError(
@@ -1606,7 +1704,7 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
             final_model = str(source.get("model_type") or "")
             if not _supports_reference_images(final_model):
                 picked = _pick_pose_identity_model(
-                    mcp_url, requested if explicit else None
+                    mcp_url, requested if explicit else None, anchor=_family_anchor
                 )
                 if explicit:
                     hint = f" (e.g. '{picked}')" if picked else ""
@@ -1768,6 +1866,13 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         except Exception:
             catalog = []
         before = list(source["activated_loras"])
+        if not catalog:
+            logger.warning(
+                "Job %s: couldn't read WanGP's LoRA list for %s — sending %s as "
+                "configured. If a file sits in a subfolder of the LoRA folder "
+                "WanGP will report it missing.",
+                job.get("id"), source.get("model_type"), before,
+            )
         after = _resolve_lora_against_catalog(before, catalog)
         if after != before:
             logger.info(
@@ -1775,6 +1880,7 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 job.get("id"), before, after,
             )
             source["activated_loras"] = after
+        _drop_auto_system_loras(source, catalog, job.get("id"))
 
     # Pose-driven without a LoRA on an LTX model: activate Union Control by keyword.
     # (LTX-2 needs this IC LoRA for control; VACE/Animate-family picks above
@@ -1811,7 +1917,9 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
     # genuinely came up empty.
     if source.get("video_guide"):
         _guide_model = str(source.get("model_type") or "")
-        if _needs_control_lora(_guide_model) and not source.get("activated_loras"):
+        _auto_control = _LTX2_SYSTEM_LORAS["union-control"](source)
+        if (_needs_control_lora(_guide_model) and not source.get("activated_loras")
+                and not _auto_control):
             logger.warning(
                 "Job %s: %s is an LTX-2 model and needs a pose/depth/canny IC "
                 "LoRA for control, but none is activated — the driving video "
@@ -1907,6 +2015,43 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 "Job %s: ia2v auto-activated CelebV-HQ LoRA '%s'",
                 job.get("id"), picked,
             )
+
+    # ── Final LoRA check against the model that will actually run ─────────
+    # WanGP looks for activated_loras in the final model's own LoRA folder
+    # and rejects the whole job if any is missing. Anything the steps above
+    # left in place that this model's folder doesn't have (e.g. an LTX LoRA
+    # after Auto moved to another family) is dropped here with a warning.
+    if source.get("activated_loras"):
+        try:
+            final_cat, _ = list_loras_for_model(mcp_url, str(source.get("model_type") or ""))
+        except Exception:
+            final_cat = []
+        if final_cat:
+            have = set()
+            for item in final_cat:
+                n = (str(item.get("name") or item.get("filename") or "")
+                     if isinstance(item, dict) else str(item))
+                have.add(n.replace("\\", "/").lower())
+            raw_m = source.get("loras_multipliers")
+            m_is_str = isinstance(raw_m, str)
+            mults = raw_m.split() if m_is_str else list(raw_m or [])
+            keep_l, keep_m, dropped = [], [], []
+            for i, name in enumerate(source["activated_loras"]):
+                if str(name).replace("\\", "/").lower() in have:
+                    keep_l.append(name)
+                    if i < len(mults):
+                        keep_m.append(mults[i])
+                else:
+                    dropped.append(name)
+            if dropped:
+                logger.warning(
+                    "Job %s: LoRA(s) %s are not installed for '%s' — dropped so "
+                    "WanGP doesn't reject the job",
+                    job.get("id"), dropped, source.get("model_type"),
+                )
+                source["activated_loras"] = keep_l
+                source["loras_multipliers"] = " ".join(keep_m) if m_is_str else keep_m
+                source["_dropped_loras"] = dropped
 
     for key in (
         "image_start", "image_end", "image_refs",
@@ -3052,6 +3197,15 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
         return False
 
     logger.info("MCP wangp_generate → %s model=%s", _mcp_endpoint(mcp_url), source.get("model_type"))
+    dropped = source.pop("_dropped_loras", None)
+    try:
+        db.update_job(job_id, {
+            "resolved_model_type": source.get("model_type"),
+            "resolved_loras": list(source.get("activated_loras") or []),
+            "dropped_loras": dropped or [],
+        })
+    except Exception:
+        logger.debug("could not record resolved model for %s", job_id)
 
     gen_args: dict = {"source": source, "wait": False, "event_limit": 20}
     # If the server advertises a "return the bytes inline" flag, use it — that
