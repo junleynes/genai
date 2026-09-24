@@ -91,6 +91,13 @@ def _is_control_capable(model_type: str, name: str = "", family: str = "") -> bo
     like pose control being broken.
     """
     blob = f"{model_type} {name} {family}".lower()
+    # LTX-2.3 MSR (and EditAnything) are LTX-2 finetunes whose WanGP
+    # definition offers no pose/depth/canny control video at all ("No
+    # Control Video" only). Feeding them one breaks the token layout
+    # ("LTX2 RoPE could not derive a broadcastable token layout").
+    if _is_ltx2_family(model_type, name, family) and any(
+            k in blob for k in ("msr", "edit_anything", "edit anything", "editanything")):
+        return False
     if any(k in blob for k in (
         "vace",      # VACE + VACE Lynx: the main control family
         "control",   # generic controlnet-style finetunes
@@ -166,14 +173,13 @@ def _pick_control_model(mcp_url: str, requested: str | None = None,
     ]
     if not capable:
         return None
-    if not requested:
-        capable = _same_family_first(capable, anchor)
 
     # Honour an explicit request when it is genuinely capable.
     if requested:
         for m in capable:
             if m.get("model_type") == requested:
                 return requested
+    capable = _same_family_first(capable, anchor)
 
     # Prefer VACE proper, then other control families. LTX-2 ranks lower
     # only because it additionally needs an IC LoRA activated to work.
@@ -216,13 +222,12 @@ def _pick_pose_identity_model(
     ]
     if not capable:
         return None
-    if not requested:
-        capable = _same_family_first(capable, anchor)
 
     if requested:
         for m in capable:
             if m.get("model_type") == requested:
                 return requested
+    capable = _same_family_first(capable, anchor)
 
     def rank(m: dict) -> int:
         blob = f"{m.get('model_type','')} {m.get('name','')} {m.get('family','')}".lower()
@@ -1700,7 +1705,23 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         # the guide pose — the reference face and scene are ignored, which
         # looks like "plain dancing video of a stranger". Prefer VACE /
         # Animate; fail loudly on an explicit non-capable pick.
-        if source.get("image_refs"):
+        if source.get("image_refs") and _is_ltx2_family(str(source.get("model_type") or "")):
+            # LTX-2 has no pose + reference-image mode: WanGP's LTX-2 controls
+            # are "Transfer Human Motion" etc. with an optional start image,
+            # and MSR takes references but no control video. Sending both
+            # (V?I) garbles the token layout. Use the first reference as the
+            # start frame — the supported LTX way to put a given person in
+            # the driven motion — and keep the pose guide.
+            first_ref = source["image_refs"][0]
+            source.pop("image_refs", None)
+            source["image_start"] = first_ref
+            source["image_prompt_type"] = "S"
+            source["video_prompt_type"] = str(source.get("video_prompt_type") or "").replace("I", "")
+            logger.info(
+                "Job %s: LTX-2 pose + reference → reference used as start frame "
+                "(video_prompt_type=%s)", job.get("id"), source["video_prompt_type"],
+            )
+        elif source.get("image_refs"):
             final_model = str(source.get("model_type") or "")
             if not _supports_reference_images(final_model):
                 picked = _pick_pose_identity_model(
