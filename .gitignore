@@ -11,3 +11,4 @@ static/results/
 node_modules/
 .next/
 static/auth-jump.html
+static/thumbs/

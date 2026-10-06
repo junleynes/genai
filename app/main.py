@@ -18,12 +18,12 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import auth, catalog, credits, db
+from . import auth, catalog, credits, db, thumbs
 from . import generation as gen_mod
 from .generation import CREATIVE_LAB_TYPES, process_job, test_wan2gp_connection, BACKEND_ID, BACKEND_BUILT, mcp_call_tool, list_models_for_job_type, list_loras_for_model, try_start_queued_jobs, mcp_discover_tools, mcp_ensure_session
 
@@ -83,7 +83,23 @@ async def _startup_queue_hook():
         logger.exception("queue startup recovery failed")
 
     logger.info("LTX Creative Lab ready")
-app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
+class _CachedStatic(StaticFiles):
+    """StaticFiles + long-lived caching for content-addressed media.
+
+    Result, library-import and thumbnail filenames are unique per file, so they
+    can be cached forever. Code/CSS/JS and per-job uploads (reused names) keep
+    the default revalidation.
+    """
+    _IMMUTABLE = ("results/", "library/", "thumbs/")
+
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        if resp.status_code in (200, 206) and path.startswith(self._IMMUTABLE):
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
+
+
+app.mount("/static", _CachedStatic(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
 
@@ -1418,16 +1434,46 @@ def list_library(
     media_type: str = "",
     favorites: bool = False,
     search: str = "",
-    limit: int = 500,
+    limit: int = 48,
+    offset: int = 0,
 ):
-    items = db.get_library(
+    limit = max(1, min(int(limit or 48), 200))
+    offset = max(0, int(offset or 0))
+    # Fetch one extra row to know whether another page exists.
+    rows = db.get_library(
         user["id"],
         media_type=media_type or None,
         favorites_only=bool(favorites),
         search=search,
-        limit=max(1, min(int(limit or 500), 2000)),
+        limit=limit + 1,
+        offset=offset,
     )
-    return {"items": items, "stats": db.library_stats(user["id"])}
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    for it in items:
+        if it.get("media_type") in ("image", "video"):
+            it["thumb_url"] = f"/thumb/{it['id']}.jpg"
+    out = {"items": items, "has_more": has_more, "offset": offset}
+    if offset == 0:  # stats only needed once per filter change
+        out["stats"] = db.library_stats(user["id"])
+    return out
+
+
+@app.get("/thumb/{item_id}.jpg")
+def library_thumb(item_id: str):
+    """Cached 480px JPEG for a library item (generated on first request).
+
+    Unauthenticated like /static/*: <img> tags can't send the bearer token,
+    and item ids are unguessable UUIDs.
+    """
+    item = db.get_library_item(item_id)
+    if not item:
+        raise HTTPException(404, "Not found")
+    path = thumbs.ensure_thumb(item_id, item.get("url", ""), item.get("media_type", ""))
+    if not path:
+        raise HTTPException(404, "No thumbnail")
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @app.get("/api/library/showcase")
@@ -1466,6 +1512,7 @@ def remove_library_item(item_id: str, user: dict = Depends(auth.get_current_user
     )
     if not removed:
         raise HTTPException(404, "Not found or not allowed")
+    thumbs.delete_thumb(item_id)
     # Only unlink the file when no other library row references it.
     url = removed.get("url") or ""
     if url.startswith("/static/results/") and not db.library_url_in_use(url, exclude_id=item_id):

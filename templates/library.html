@@ -51,14 +51,19 @@ if (!requireAuth()) throw new Error('auth');
 let ITEMS = [];
 let FILTER = '';
 let SEARCH = '';
+const PAGE_SIZE = 48;
+let HAS_MORE = false;
+let LOADING = false;
+let GEN = 0;          // bumps on every filter/search change so stale responses are dropped
 
 function qs(params) {
   const p = new URLSearchParams();
   if (params.media_type) p.set('media_type', params.media_type);
   if (params.favorites) p.set('favorites', 'true');
   if (params.search) p.set('search', params.search);
-  const s = p.toString();
-  return s ? '?' + s : '';
+  p.set('limit', PAGE_SIZE);
+  p.set('offset', params.offset || 0);
+  return '?' + p.toString();
 }
 
 function statCard(label, value) {
@@ -77,18 +82,50 @@ function mediaMissing(el) {
   el.replaceWith(d);
 }
 
+// Thumbnail failed (no ffmpeg/Pillow, or file gone). Images fall back to the
+// original; videos get a neutral placeholder rather than a broken icon.
+function thumbFailed(img, id) {
+  const it = ITEMS.find(x => x.id === id);
+  if (it && it.media_type === 'image' && img.dataset.fallback !== '1') {
+    img.dataset.fallback = '1';
+    img.src = it.url;
+  } else if (it && it.media_type === 'video') {
+    const d = document.createElement('div');
+    d.className = 'w-full h-40 flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-4xl';
+    d.textContent = '🎬';
+    img.replaceWith(d);
+  } else {
+    mediaMissing(img);
+  }
+}
+
+// Videos only download when hovered: the grid shows a cheap JPEG poster and
+// swaps in a <video> on mouseenter.
+function hoverPlay(box, id) {
+  const it = ITEMS.find(x => x.id === id);
+  if (!it || it.media_type !== 'video' || box.querySelector('video')) return;
+  const v = document.createElement('video');
+  v.src = it.url;
+  v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'auto';
+  v.className = 'absolute inset-0 w-full h-40 object-cover bg-black pointer-events-none';
+  v.onerror = () => v.remove();
+  box.appendChild(v);
+  v.play().catch(() => v.remove());
+}
+function hoverStop(box) { box.querySelector('video')?.remove(); }
+
 function tile(it) {
-  const media = it.media_type === 'video'
-    ? `<video src="${it.url}" class="w-full h-40 object-cover bg-black" muted
-              onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0"
-              onerror="mediaMissing(this)"></video>`
-    : it.media_type === 'audio'
-      ? `<div class="w-full h-40 flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-4xl">🎵</div>`
-      : `<img src="${it.url}" loading="lazy" class="w-full h-40 object-cover bg-slate-50 dark:bg-slate-950"
-             onerror="mediaMissing(this)" />`;
-  return `<div class="group rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:shadow-lg transition">
-    <div class="relative cursor-pointer" onclick="openDrawer('${it.id}')">
+  const media = it.media_type === 'audio'
+    ? `<div class="w-full h-40 flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-4xl">🎵</div>`
+    : `<img src="${it.thumb_url || it.url}" loading="lazy" decoding="async"
+            class="w-full h-40 object-cover bg-slate-50 dark:bg-slate-950"
+            onerror="thumbFailed(this,'${it.id}')" />`;
+  const hover = it.media_type === 'video'
+    ? `onmouseenter="hoverPlay(this,'${it.id}')" onmouseleave="hoverStop(this)"` : '';
+  return `<div class="group rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden hover:shadow-lg transition" data-id="${it.id}">
+    <div class="relative cursor-pointer" onclick="openDrawer('${it.id}')" ${hover}>
       ${media}
+      ${it.media_type === 'video' ? '<span class="absolute bottom-2 left-2 text-[10px] px-1.5 py-0.5 rounded bg-black/50 text-white pointer-events-none">▶</span>' : ''}
       <button onclick="event.stopPropagation();toggleFav('${it.id}')"
         class="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 text-white text-sm leading-none
                ${it.favorite ? '' : 'opacity-0 group-hover:opacity-100'} transition">
@@ -107,27 +144,75 @@ function tile(it) {
   </div>`;
 }
 
-async function load() {
+const EMPTY_HTML = `<div class="col-span-full text-center py-16 text-slate-500">
+  <p class="text-4xl mb-3">🗂️</p>
+  <p>Nothing here yet. Generated media lands here automatically.</p>
+</div>`;
+
+// reset=true starts over (filter/search/import); otherwise appends the next page.
+async function load(reset = true) {
   const grid = document.getElementById('grid');
+  if (reset) { GEN++; ITEMS = []; HAS_MORE = false; LOADING = false; }
+  if (LOADING) return;
+  LOADING = true;
+  const gen = GEN;
   try {
     const params = FILTER === 'fav'
       ? { favorites: true, search: SEARCH }
       : { media_type: FILTER, search: SEARCH };
+    params.offset = ITEMS.length;
     const data = await API.get('/api/library' + qs(params));
-    ITEMS = data.items || [];
-    const s = data.stats || {};
+    if (gen !== GEN) return;           // superseded by a newer filter/search
+    const page = data.items || [];
+    HAS_MORE = !!data.has_more;
+    if (data.stats) {
+      const s = data.stats;
+      document.getElementById('stats').innerHTML =
+        statCard('Total', s.total || 0) + statCard('Images', s.images || 0) +
+        statCard('Videos', s.videos || 0) + statCard('Favorites', s.favorites || 0);
+    }
+    if (reset) grid.innerHTML = '';
+    ITEMS = ITEMS.concat(page);
+    if (!ITEMS.length) grid.innerHTML = EMPTY_HTML;
+    else grid.insertAdjacentHTML('beforeend', page.map(tile).join(''));
+  } catch (e) {
+    if (gen === GEN && reset) {
+      grid.innerHTML = `<p class="text-red-500 col-span-full">${escapeHtml(e.message || 'Failed to load')}</p>`;
+    } else if (gen === GEN) {
+      toast(e.message || 'Failed to load more', 'error');
+    }
+  } finally {
+    if (gen === GEN) LOADING = false;
+    // The sentinel may still be on screen after a short page; check again.
+    if (gen === GEN && HAS_MORE) requestAnimationFrame(maybeLoadMore);
+  }
+}
+
+// Infinite scroll
+const sentinel = document.createElement('div');
+sentinel.id = 'sentinel'; sentinel.style.height = '1px';
+document.getElementById('grid').after(sentinel);
+function maybeLoadMore() {
+  if (!HAS_MORE || LOADING) return;
+  if (sentinel.getBoundingClientRect().top < window.innerHeight + 600) load(false);
+}
+new IntersectionObserver((e) => { if (e[0].isIntersecting) maybeLoadMore(); },
+  { rootMargin: '600px' }).observe(sentinel);
+
+async function refreshStats() {
+  try {
+    const d = await API.get('/api/library?limit=1&offset=0');
+    const s = d.stats; if (!s) return;
     document.getElementById('stats').innerHTML =
       statCard('Total', s.total || 0) + statCard('Images', s.images || 0) +
       statCard('Videos', s.videos || 0) + statCard('Favorites', s.favorites || 0);
-    grid.innerHTML = ITEMS.length
-      ? ITEMS.map(tile).join('')
-      : `<div class="col-span-full text-center py-16 text-slate-500">
-           <p class="text-4xl mb-3">🗂️</p>
-           <p>Nothing here yet. Generated media lands here automatically.</p>
-         </div>`;
-  } catch (e) {
-    grid.innerHTML = `<p class="text-red-500 col-span-full">${escapeHtml(e.message || 'Failed to load')}</p>`;
-  }
+  } catch (e) { /* stats are cosmetic */ }
+}
+
+// Re-render one tile in place (favorite toggle) instead of refetching the list.
+function rerenderTile(it) {
+  const el = document.querySelector(`#grid [data-id="${it.id}"]`);
+  if (el) el.outerHTML = tile(it);
 }
 
 async function toggleFav(id) {
@@ -136,7 +221,7 @@ async function toggleFav(id) {
   try {
     await API.patch('/api/library/' + id, { favorite: !it.favorite });
     it.favorite = !it.favorite;
-    load();
+    if (FILTER === 'fav') load(); else { rerenderTile(it); refreshStats(); }
   } catch (e) { toast(e.message || 'Failed', 'error'); }
 }
 

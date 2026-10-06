@@ -471,6 +471,7 @@ def get_library(
     favorites_only: bool = False,
     search: str = "",
     limit: int = 500,
+    offset: int = 0,
 ) -> list[dict]:
     """Items owned by this user, newest first."""
     with _lock:
@@ -489,7 +490,7 @@ def get_library(
             or any(term in t.lower() for t in (i.get("tags") or []))
         ]
     out.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-    return out[:limit]
+    return out[max(0, offset):max(0, offset) + limit]
 
 
 def get_library_item(item_id: str, user_id: Optional[str] = None) -> Optional[dict]:
@@ -590,12 +591,13 @@ def library_url_in_use(url: str, exclude_id: str = "") -> bool:
 
 def library_stats(user_id: str) -> dict:
     items = get_library(user_id, limit=100000)
-    return {
-        "total": len(items),
-        "images": sum(1 for i in items if i.get("media_type") == "image"),
-        "videos": sum(1 for i in items if i.get("media_type") == "video"),
-        "favorites": sum(1 for i in items if i.get("favorite")),
-    }
+    images = videos = favs = 0
+    for i in items:
+        mt = i.get("media_type")
+        images += mt == "image"
+        videos += mt == "video"
+        favs += bool(i.get("favorite"))
+    return {"total": len(items), "images": images, "videos": videos, "favorites": favs}
 
 
 def library_showcase(user_id: str) -> dict:

@@ -3089,6 +3089,8 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
                 source="generated",
             )
             logger.info("Job %s filed to library as %s", job_id, item.get("id"))
+            from . import thumbs
+            thumbs.pregenerate(item)
     except Exception as e:
         # Never fail a completed job because of library bookkeeping.
         logger.warning("Library insert failed for job %s: %s", job_id, e)
