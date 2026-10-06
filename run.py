@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch WanForge.
+"""Launch LTX Creative Lab.
 
 Runs as an NSSM service, so auto-reload is OFF by default. Uvicorn's
 --reload on Windows spawns a worker child per-reload; under a service

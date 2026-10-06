@@ -136,4 +136,6 @@ python scripts/diagnose_wangp.py http://HOST:PORT/mcp/
 
 ## License / upstream
 
-This project is a frontend for [Wan2GP](https://github.com/). Use and configure models according to their respective licenses and WanGP’s documentation.
+This project is a frontend for [Wan2GP](https://github.com/deepbeepmeep/Wan2GP). Use and configure models according to their respective licenses and WanGP’s documentation.
+
+No license file is included yet; add a `LICENSE` before sharing or accepting contributions.
