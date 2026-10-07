@@ -21,7 +21,7 @@ from urllib.parse import quote
 
 import httpx
 
-from . import db
+from . import db, mediafit, profiles
 
 logger = logging.getLogger("genai.generation")
 
@@ -790,7 +790,17 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
 
     resolution = params.get("resolution") or defaults.get("resolution") or "1280x704"
     steps = int(params.get("steps") or params.get("num_inference_steps") or defaults.get("num_inference_steps") or 8)
-    seed = int(params.get("seed", -1))
+    try:
+        seed = int(params.get("seed", -1))
+    except (TypeError, ValueError):
+        seed = -1  # blank/garbage seed means random, not a crashed job
+    # Blank/None CFG means "Auto": the model's profile decides (resolved again
+    # after final model selection in _prepare_mcp_source). An explicit value —
+    # including 0 — is always honoured.
+    requested_cfg = params.get("guidance_scale")
+    if requested_cfg in (None, ""):
+        requested_cfg = params.get("cfg")
+    cfg_auto = requested_cfg in (None, "")
     duration = float(params.get("duration") or params.get("duration_seconds") or 4)
     video_length = params.get("video_length")
     if video_length is None:
@@ -817,10 +827,12 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
         "video_length": int(video_length),
         "duration_seconds": duration,
         "force_fps": str(params.get("force_fps") or params.get("fps") or defaults.get("force_fps") or "24"),
-        "guidance_scale": float(params.get("guidance_scale") or params.get("cfg") or 5.0),
+        "guidance_scale": profiles.resolve_cfg(str(model), requested_cfg, defaults.get("guidance_scale")),
         "flow_shift": float(params.get("flow_shift") or 5.0),
         "_api": {"return_media": True},
     }
+    if cfg_auto:
+        settings["_cfg_auto"] = True
 
     image_path = (
         job.get("image_path") or params.get("image_path")
@@ -1500,6 +1512,53 @@ def _resolve_local_media(p: str | None) -> Optional[str]:
     return None
 
 
+_SNAP_TYPES = ("t2v", "i2v", "ia2v", "p2v", "msr")
+
+
+def _finalize_sampling(source: dict, job: dict, settings_cfg: dict) -> tuple[dict, list[str]]:
+    """Make sampler values valid for the model that will actually run.
+
+    Runs after model resolution (which can change the model mid-way), so the
+    CFG, resolution grid and frame count are all decided against the final
+    model. Returns (post_process_spec, user_visible_notes).
+    """
+    jtype = job.get("job_type", "t2v")
+    params = job.get("params") or {}
+    model = str(source.get("model_type") or "")
+    notes: list[str] = []
+    post: dict = {}
+
+    if source.pop("_cfg_auto", False):
+        source["guidance_scale"] = profiles.resolve_cfg(
+            model, None, settings_cfg.get("default_guidance_scale"))
+    cfg = float(source.get("guidance_scale", 5.0))
+
+    user_neg = (params.get("negative_prompt") or "").strip()
+    if user_neg and not profiles.negative_is_effective(model, cfg):
+        notes.append(
+            f"Negative prompt has no effect at CFG {cfg:g} on {model or 'this model'} "
+            "(guidance is off). Say what you want in the positive prompt, or use a "
+            "non-distilled model with CFG above 1."
+        )
+
+    if jtype in _SNAP_TYPES:
+        res, requested = profiles.snap_resolution(str(source.get("resolution") or ""), model)
+        if requested:
+            source["resolution"] = res
+            post["crop_to"] = list(requested)
+            notes.append(
+                f"{model} needs sizes in multiples of {profiles.profile_for(model)['res_multiple']}: "
+                f"generated at {res}, trimmed back to {requested[0]}x{requested[1]}."
+            )
+        if params.get("video_length") is None and source.get("video_length"):
+            snapped = profiles.snap_frames(int(source["video_length"]), model)
+            if snapped != int(source["video_length"]):
+                logger.info("Job %s: frame count %s -> %s for %s",
+                            job.get("id"), source["video_length"], snapped, model)
+                source["video_length"] = snapped
+    return post, notes
+
+
 def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
     defaults = {
         "model_type": settings_cfg.get("default_model_type") or "ltx2_22B_distilled_1_1",
@@ -1507,6 +1566,7 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
         "resolution": settings_cfg.get("default_resolution") or "1280x704",
         "num_inference_steps": settings_cfg.get("default_steps") or 8,
         "force_fps": settings_cfg.get("default_fps") or "24",
+        "guidance_scale": settings_cfg.get("default_guidance_scale"),
     }
     # Per-job-type model/LoRA defaults, so Easy mode can hide both pickers.
     for _jt in ("t2v", "i2v", "ia2v", "v2v", "p2v", "t2i", "i2i", "cs", "fs", "msr", *CREATIVE_LAB_TYPES):
@@ -2073,6 +2133,12 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 source["activated_loras"] = keep_l
                 source["loras_multipliers"] = " ".join(keep_m) if m_is_str else keep_m
                 source["_dropped_loras"] = dropped
+
+    post, notes = _finalize_sampling(source, job, settings_cfg)
+    if post:
+        source["_postprocess"] = post
+    if notes:
+        source["_notes"] = notes
 
     for key in (
         "image_start", "image_end", "image_refs",
@@ -3057,6 +3123,23 @@ def _apply_mcp_result(job_id: str, result: dict, mcp_url: str = "", gradio_url: 
         db.update_job(job_id, {"error": msg[:800], "status": "failed", "progress": 0})
         return False
 
+    # Trim padding / loop, if the job asked for it. Never fails the job: on any
+    # problem the untouched file is delivered.
+    try:
+        spec = (db.get_job(job_id) or {}).get("postprocess") or {}
+        local = _resolve_local_media(url) if spec else None
+        if local and _media_type_for(url) == "video":
+            crop = spec.get("crop_to")
+            outcome = mediafit.postprocess_video(
+                local,
+                crop_to=tuple(crop) if crop else None,
+                loop_to=float(spec.get("loop_to") or 0),
+                drop_last_frame=bool(spec.get("drop_last_frame")),
+            )
+            logger.info("Job %s postprocess: %s", job_id, outcome)
+    except Exception:
+        logger.exception("Job %s postprocess failed; delivering original", job_id)
+
     db.update_job(job_id, {
         "status": "completed",
         "progress": 100,
@@ -3221,11 +3304,17 @@ def _run_mcp_generate(job_id: str, job: dict, settings_cfg: dict) -> bool:
 
     logger.info("MCP wangp_generate → %s model=%s", _mcp_endpoint(mcp_url), source.get("model_type"))
     dropped = source.pop("_dropped_loras", None)
+    postprocess = source.pop("_postprocess", None)
+    notes = source.pop("_notes", None)
     try:
         db.update_job(job_id, {
             "resolved_model_type": source.get("model_type"),
             "resolved_loras": list(source.get("activated_loras") or []),
             "dropped_loras": dropped or [],
+            "postprocess": postprocess or {},
+            "notes": notes or [],
+            "resolved_cfg": source.get("guidance_scale"),
+            "resolved_resolution": source.get("resolution"),
         })
     except Exception:
         logger.debug("could not record resolved model for %s", job_id)

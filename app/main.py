@@ -1221,7 +1221,7 @@ async def create_job(
     resolution: str = Form("832x480"),
     steps: int = Form(20),
     seed: int = Form(-1),
-    guidance_scale: float = Form(7.5),
+    guidance_scale: str = Form(""),   # blank = Auto (model profile decides)
     duration_seconds: float = Form(4.0),
     fps: int = Form(16),
     model: str = Form("auto"),
@@ -1345,11 +1345,19 @@ async def create_job(
             "(background/setting first, then subjects and objects).",
         )
 
+    cfg_raw = (guidance_scale or "").strip()
+    try:
+        cfg_val = float(cfg_raw) if cfg_raw else None
+    except ValueError:
+        raise HTTPException(400, "Guidance scale must be a number, or blank for Auto")
+    if cfg_val is not None and not (0 <= cfg_val <= 30):
+        raise HTTPException(400, "Guidance scale must be between 0 and 30")
+
     params = {
         "resolution": resolution,
         "steps": steps,
         "seed": seed,
-        "guidance_scale": guidance_scale,
+        "guidance_scale": cfg_val,
         "duration_seconds": duration_seconds,
         "fps": fps,
         "model": model,

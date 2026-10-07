@@ -132,6 +132,9 @@ function renderJobCard(j) {
           <div class="font-semibold mb-1">Generation failed</div>
           <div class="whitespace-pre-wrap break-words">${escapeHtml(j.error || 'Unknown error')}</div>
         </div>` : ''}
+        ${(j.notes && j.notes.length) ? `<div class="mt-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-sm text-amber-800 dark:text-amber-200">
+          <ul class="list-disc pl-5 space-y-1">${j.notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>
+        </div>` : ''}
         ${j.result_url && j.status === 'completed' ? `
           <div class="mt-4">
             ${/\.(mp4|webm|mov)(\?|$)/i.test(j.result_url) || (j.job_type && j.job_type.includes('2v') && !j.job_type.includes('2i'))
@@ -149,7 +152,7 @@ function renderJobCard(j) {
 // innerHTML replace would recreate <video> elements every 4s and restart
 // playback even for jobs that finished long ago.
 function jobSignature(j) {
-  return JSON.stringify([j.status, j.progress, j.result_url, j.error, j.title, j.prompt, j.credits && j.credits.status, j.resolved_model_type, j.resolved_loras]);
+  return JSON.stringify([j.status, j.progress, j.result_url, j.error, j.title, j.prompt, j.credits && j.credits.status, j.resolved_model_type, j.resolved_loras, j.notes]);
 }
 
 let jobOrder = [];

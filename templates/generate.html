@@ -298,7 +298,7 @@
             </div>
             <div>
               <label class="block text-sm font-medium mb-1.5">Guidance scale (CFG)</label>
-              <input type="number" name="guidance_scale" value="{{ settings.default_guidance_scale or 7.5 }}" min="0" max="30" step="0.5" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
+              <input type="number" name="guidance_scale" value="" placeholder="Auto" min="0" max="30" step="0.5" title="Blank = Auto: the model's own default (distilled LTX uses 1). 0 is a valid value." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950" />
             </div>
             <div>
               <label class="block text-sm font-medium mb-1.5">Seed (-1 = random)</label>
@@ -388,10 +388,10 @@ let CONTROL_SEED = null;
 // Every preset states all four values so Easy mode sends a complete, explicit
 // configuration rather than leaving some fields to server-side defaults.
 const QUALITY_PRESETS = {
-  fast:      { video: '832x480',   image: '832x480',   steps: 15, guidance_scale: 6.0, fps: 16 },
-  balanced:  { video: '832x480',   image: '1024x1024', steps: 20, guidance_scale: 7.5, fps: 24 },
-  quality:   { video: '1280x720',  image: '1024x1024', steps: 30, guidance_scale: 7.5, fps: 24 },
-  broadcast: { video: '1920x1080', image: '1920x1080', steps: 40, guidance_scale: 8.0, fps: {{ settings.default_fps or 30 }} },
+  fast:      { video: '832x480',   image: '832x480',   steps: 15, fps: 16 },
+  balanced:  { video: '832x480',   image: '1024x1024', steps: 20, fps: 24 },
+  quality:   { video: '1280x720',  image: '1024x1024', steps: 30, fps: 24 },
+  broadcast: { video: '1920x1080', image: '1920x1080', steps: 40, fps: {{ settings.default_fps or 30 }} },
 };
 
 function presetValues(name) {
@@ -399,7 +399,6 @@ function presetValues(name) {
   return {
     resolution: isVideoOut() ? p.video : p.image,
     steps: p.steps,
-    guidance_scale: p.guidance_scale,
     fps: p.fps,
   };
 }
@@ -412,8 +411,8 @@ function updatePresetSummary() {
   const v = presetValues(sel.value);
   // Spelled out so CFG and FPS aren't invisible in Easy mode.
   el.textContent = isVideoOut()
-    ? `${v.resolution} · ${v.steps} steps · CFG ${v.guidance_scale} · ${v.fps} fps`
-    : `${v.resolution} · ${v.steps} steps · CFG ${v.guidance_scale}`;
+    ? `${v.resolution} · ${v.steps} steps · CFG auto · ${v.fps} fps`
+    : `${v.resolution} · ${v.steps} steps · CFG auto`;
   el.title = 'Switch to Advanced to change these individually';
 }
 
@@ -1091,9 +1090,9 @@ document.getElementById('gen-form').addEventListener('submit', async (e) => {
     const cfg = presetValues(document.getElementById('easy-preset').value);
     fd.set('resolution', cfg.resolution);
     fd.set('steps', String(cfg.steps));
-    // Easy mode previously sent neither of these, so the server fell back to
-    // its own defaults and the preset's quality intent was half-ignored.
-    fd.set('guidance_scale', String(cfg.guidance_scale));
+    // CFG is deliberately not sent: blank = Auto, so the server picks the
+    // right value for whichever model the job resolves to.
+    fd.delete('guidance_scale');
     if (isVideoOut()) {
       fd.set('fps', String(cfg.fps));
       fd.set('duration_seconds', document.getElementById('easy-duration').value);
