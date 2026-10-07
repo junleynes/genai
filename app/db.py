@@ -1,11 +1,15 @@
 """Simple JSON-based database for users, jobs, and settings."""
 import json
+import logging
 import os
+import secrets
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -246,18 +250,54 @@ def update_user(user_id: str, updates: dict) -> Optional[dict]:
         return None
 
 
+DEFAULT_ADMIN_EMAIL = "admin@example.com"
+LEGACY_ADMIN_PASSWORD = "admin123"   # what older installs shipped with
+
+
+def set_user_password(user_id: str, password_hash: str) -> bool:
+    with _lock:
+        users = _load(USERS_FILE, [])
+        for u in users:
+            if u["id"] == user_id:
+                u["password_hash"] = password_hash
+                _save(USERS_FILE, users)
+                return True
+    return False
+
+
 def ensure_admin():
-    """Create default admin if no users exist."""
+    """First run: create the admin with a random password. Existing installs:
+    warn if the well-known legacy password still works."""
+    from .auth import hash_password, verify_password
     users = get_users()
     if not users:
-        from .auth import hash_password
+        supplied = os.environ.get("GENAI_ADMIN_PASSWORD", "").strip()
+        password = supplied or secrets.token_urlsafe(12)
         create_user(
-            email="admin@example.com",
-            password_hash=hash_password("admin123"),
+            email=DEFAULT_ADMIN_EMAIL,
+            password_hash=hash_password(password),
             name="Administrator",
             role="admin",
         )
-        print("✓ Default admin created: admin@example.com / admin123")
+        if supplied:
+            print(f"✓ Admin created: {DEFAULT_ADMIN_EMAIL} (password from GENAI_ADMIN_PASSWORD)")
+        else:
+            # Shown once, here only. Lose it and run scripts/set_admin_password.py.
+            print("=" * 64)
+            print(f"✓ Admin created: {DEFAULT_ADMIN_EMAIL}")
+            print(f"  One-time password: {password}")
+            print("  Sign in and change it; it is not stored anywhere readable.")
+            print("=" * 64)
+        return
+    for u in users:
+        if u.get("email", "").lower() == DEFAULT_ADMIN_EMAIL and verify_password(
+            LEGACY_ADMIN_PASSWORD, u.get("password_hash", "")
+        ):
+            logger.warning(
+                "SECURITY: %s still uses the default password '%s'. Change it now "
+                "(or run: python scripts/set_admin_password.py).",
+                DEFAULT_ADMIN_EMAIL, LEGACY_ADMIN_PASSWORD,
+            )
 
 
 # ─── Jobs ──────────────────────────────────────────────────────────────────────

@@ -1,5 +1,9 @@
 """JWT authentication helpers."""
+import logging
+import os
+import secrets
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 import bcrypt
@@ -9,7 +13,53 @@ from jose import JWTError, jwt
 
 from . import db
 
-SECRET_KEY = "genai-secret-change-me-in-production-2026"
+logger = logging.getLogger(__name__)
+
+MIN_SECRET_LEN = 32
+
+
+def load_secret_key(data_dir: Path) -> str:
+    """Signing key for JWTs. Never a value that lives in the repository.
+
+    Order: GENAI_SECRET_KEY environment variable, then data/.jwt_secret, which
+    is generated on first run and kept out of git. Because the file is created
+    exclusively, several workers starting at once all end up with the same key.
+    """
+    env = os.environ.get("GENAI_SECRET_KEY", "").strip()
+    if env:
+        if len(env) >= MIN_SECRET_LEN:
+            return env
+        logger.warning("GENAI_SECRET_KEY is shorter than %d characters; ignoring it", MIN_SECRET_LEN)
+
+    path = Path(data_dir) / ".jwt_secret"
+    try:
+        existing = path.read_text(encoding="utf-8").strip()
+        if len(existing) >= MIN_SECRET_LEN:
+            return existing
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        logger.warning("Could not read %s: %s", path, e)
+
+    new = secrets.token_urlsafe(48)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(new)
+        logger.info("Generated a new JWT signing key at %s (existing sessions were signed out)", path)
+        return new
+    except FileExistsError:
+        # Another worker won the race; use its key.
+        return path.read_text(encoding="utf-8").strip()
+    except OSError as e:
+        # Read-only data dir: fall back to a per-process key. Logins still
+        # work, but they won't survive a restart — say so loudly.
+        logger.error("Cannot persist a JWT key (%s). Using a temporary one; set GENAI_SECRET_KEY.", e)
+        return new
+
+
+SECRET_KEY = load_secret_key(db.DATA_DIR)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 72
 

@@ -3,7 +3,6 @@ __pycache__/
 .env
 .venv/
 venv/
-data/uploads/
 static/uploads/
 static/results/
 *.log
@@ -12,3 +11,9 @@ node_modules/
 .next/
 static/auth-jump.html
 static/thumbs/
+
+# Runtime state — users, password hashes, jobs, settings (internal URLs), the
+# JWT signing key, and generated media. Never commit these.
+data/*
+!data/.gitkeep
+static/library/

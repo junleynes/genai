@@ -69,8 +69,26 @@ python run.py
 
 Open **http://localhost:8080**
 
-**Default admin:** `admin@example.com` / `admin123`  
-Change this password immediately on any shared or production host.
+**First run:** an admin account `admin@example.com` is created with a **random one-time password printed in the console** (set `GENAI_ADMIN_PASSWORD` to choose it yourself). Lost it? `python scripts/set_admin_password.py`.
+
+### Secrets and runtime data
+
+- **JWT signing key** — set `GENAI_SECRET_KEY` (32+ characters), or let genai generate one into `data/.jwt_secret` on first run. Changing or regenerating it signs everyone out.
+- **`data/` and `static/library/` are runtime state and are not in git** (users and password hashes, jobs, settings with your internal URLs, the signing key, generated media). Back them up separately.
+- Older installs that still use `admin123` get a startup warning until the password is changed.
+
+### Upgrading an existing install (read before `git pull`)
+
+Earlier versions committed `data/*.json` and `static/library/*`. This version stops tracking them, so **on a server where those files were checked out from git, a plain `git pull` will delete them**. Before pulling:
+
+```bash
+cp -r data data.bak && cp -r static/library library.bak     # Windows: xcopy /E
+git pull
+# if data/ or static/library/ lost files, put them back:
+cp -rn data.bak/. data/ && cp -rn library.bak/. static/library/
+```
+
+If git refuses to pull because those files were modified locally, run the same backup, then `git checkout -- data static/library` and pull. The first start after upgrading signs everyone out once (new signing key).
 
 ## Keeping generated video on-model
 
