@@ -760,6 +760,26 @@ def _build_character_sheet_prompt(prompt: str, params: dict) -> tuple[str, str]:
     return full, negative
 
 
+PRESERVE_LAYOUT_SUFFIX = (
+    "Locked-off camera, no camera movement. The layout, colors, text and logos "
+    "stay exactly as in the first frame, sharp and readable throughout. "
+    "Flat graphic design elements only."
+)
+PRESERVE_LAYOUT_NEGATIVE = (
+    "new scene, people, characters, photographs, extra text, mirrored text, "
+    "garbled text, morphing, camera movement"
+)
+
+
+def _preserve_layout_prompt(prompt: str) -> str:
+    p = (prompt or "").strip()
+    if PRESERVE_LAYOUT_SUFFIX in p:
+        return p
+    if p and p[-1] not in ".!?":
+        p += "."
+    return f"{p} {PRESERVE_LAYOUT_SUFFIX}".strip()
+
+
 def _map_job_to_settings(job: dict, defaults: dict) -> dict:
     params = job.get("params") or {}
     jtype = job.get("job_type", "t2v")
@@ -842,6 +862,15 @@ def _map_job_to_settings(job: dict, defaults: dict) -> dict:
         job.get("image_end_path") or params.get("image_end_path")
         or params.get("end_image_url") or job.get("end_image_url")
     )
+    # Preserve layout (i2v): pin the end frame to the start image so the clip
+    # must return to the exact design, and steer the prompt toward motion only.
+    preserve = bool(params.get("preserve_layout")) and jtype == "i2v" and bool(image_path)
+    if preserve:
+        if not image_end:
+            image_end = image_path
+        settings["prompt"] = _preserve_layout_prompt(settings["prompt"])
+        if not params.get("negative_prompt"):
+            settings["negative_prompt"] = PRESERVE_LAYOUT_NEGATIVE
     video_path = (
         job.get("video_path") or params.get("video_path")
         or params.get("video_url") or job.get("video_url")
@@ -1556,7 +1585,70 @@ def _finalize_sampling(source: dict, job: dict, settings_cfg: dict) -> tuple[dic
                 logger.info("Job %s: frame count %s -> %s for %s",
                             job.get("id"), source["video_length"], snapped, model)
                 source["video_length"] = snapped
+    # Loop to a target length (post-process). Only a pinned start==end clip
+    # loops seamlessly, so say so when it isn't.
+    try:
+        loop_to = float(params.get("loop_to_seconds") or 0)
+    except (TypeError, ValueError):
+        loop_to = 0.0
+    if loop_to > 0 and jtype in _LOOP_TYPES:
+        fps = float(str(source.get("force_fps") or 24) or 24)
+        clip_s = (int(source.get("video_length") or 0) / fps) if fps else 0
+        if clip_s and loop_to <= clip_s + 0.01:
+            notes.append(f"Loop target {loop_to:g}s is not longer than the {clip_s:.1f}s clip, so nothing was looped.")
+        else:
+            post["loop_to"] = loop_to
+            if params.get("preserve_layout") and jtype == "i2v":
+                post["drop_last_frame"] = True
+            else:
+                notes.append("Looped clip: the seam is only invisible when the last frame matches the "
+                             "first. Enable Preserve layout (i2v) for a seamless loop.")
     return post, notes
+
+
+_LOOP_TYPES = ("t2v", "i2v", "ia2v", "p2v", "msr", "v2v")
+_FIT_TYPES = ("i2v", "ia2v")
+
+
+def _fit_source_images(source: dict, job: dict, settings_cfg: dict, post: dict, notes: list[str]) -> None:
+    """Conform start/end frames to the generation grid before they are staged.
+
+    Without this the backend silently resizes or crops whatever it is given, so
+    the first frame stops matching the user's design and the model "corrects"
+    it as the clip plays.
+    """
+    if job.get("job_type") not in _FIT_TYPES:
+        return
+    wh = profiles.parse_resolution(str(source.get("resolution") or ""))
+    if not wh:
+        return
+    mode = str(settings_cfg.get("source_fit") or "cover")
+    inner = tuple(post["crop_to"]) if post.get("crop_to") else None
+    done: dict[str, tuple[str, dict]] = {}
+    for key in ("image_start", "image_end"):
+        val = source.get(key)
+        if not val or isinstance(val, list):
+            continue
+        local = _resolve_local_media(str(val))
+        if not local:
+            continue
+        if local not in done:
+            done[local] = mediafit.fit_image(local, wh[0], wh[1], UPLOAD_DIR / "fitted", mode=mode, inner_size=inner)
+        fitted, info = done[local]
+        source[key] = fitted
+        label = "Start image" if key == "image_start" else "End image"
+        act = info.get("action")
+        sw, sh = info.get("src_size", (0, 0))
+        tgt = inner or wh
+        if act == "cover":
+            notes.append(f"{label} was {sw}x{sh}, a different shape from {tgt[0]}x{tgt[1]}: "
+                         f"cropped {info.get('crop_loss', 0):.1%} to fit. Supply an exact "
+                         f"{tgt[0]}x{tgt[1]} image to keep every pixel.")
+        elif act == "contain":
+            notes.append(f"{label} was {sw}x{sh}, far from {tgt[0]}x{tgt[1]}: padded to fit instead of cropping.")
+        elif act == "resize" and info.get("aspect_mismatch", 0) > 0.01:
+            notes.append(f"{label} was {sw}x{sh}: scaled to {tgt[0]}x{tgt[1]} "
+                         f"({info['aspect_mismatch']:.1%} aspect change).")
 
 
 def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
@@ -2135,6 +2227,7 @@ def _prepare_mcp_source(mcp_url: str, job: dict, settings_cfg: dict) -> dict:
                 source["_dropped_loras"] = dropped
 
     post, notes = _finalize_sampling(source, job, settings_cfg)
+    _fit_source_images(source, job, settings_cfg, post, notes)
     if post:
         source["_postprocess"] = post
     if notes:

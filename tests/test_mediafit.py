@@ -106,3 +106,29 @@ def test_loop_shorter_than_clip_is_noop_and_failure_keeps_original(tmp_path):
     bad.write_bytes(b"not a video")
     assert mediafit.postprocess_video(bad, crop_to=(100, 100))["changed"] is False
     assert bad.read_bytes() == b"not a video"
+
+
+def test_exact_size_source_is_edge_extended_to_grid(tmp_path):
+    # User supplies exactly 1920x1080; model runs on 1920x1088. The image must
+    # not be stretched: extra rows replicate the border so a centred crop back
+    # to 1080 restores the original pixels exactly.
+    src = tmp_path / "s.png"
+    im = Image.new("RGB", (1920, 1080), (200, 10, 10))
+    im.putpixel((0, 0), (1, 2, 3))          # marker in the top-left corner
+    im.putpixel((1919, 1079), (4, 5, 6))
+    im.save(src)
+    out, info = mediafit.fit_image(src, 1920, 1088, tmp_path / "o", inner_size=(1920, 1080))
+    assert info["action"] == "extend"
+    got = Image.open(out)
+    assert got.size == (1920, 1088)
+    restored = got.crop((0, 4, 1920, 1084))        # what ffmpeg's centred crop keeps
+    assert restored.tobytes() == im.tobytes()
+    assert got.getpixel((0, 0)) == (1, 2, 3)        # border row replicated upward
+    assert got.getpixel((1919, 1087)) == (4, 5, 6)
+
+
+def test_inner_size_fit_then_extend(tmp_path):
+    src = _img(tmp_path, 1916, 1018)
+    out, info = mediafit.fit_image(src, 1920, 1088, tmp_path / "o", inner_size=(1920, 1080))
+    assert Image.open(out).size == (1920, 1088)
+    assert info["extended_from"] == (1920, 1080)

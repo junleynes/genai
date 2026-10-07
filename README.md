@@ -72,6 +72,18 @@ Open **http://localhost:8080**
 **Default admin:** `admin@example.com` / `admin123`  
 Change this password immediately on any shared or production host.
 
+## Keeping generated video on-model
+
+Image-to-video only anchors the first frame, so long clips drift and invent content. genai reduces that:
+
+- **CFG is Auto by default** (blank field). Each model family has a profile in `app/profiles.py`: distilled LTX uses CFG 1 (and ignores negative prompts — the Jobs page tells you when yours was ignored). An explicit value, including 0, is always honoured.
+- **Sizes and frame counts are snapped to what the model expects** (LTX: multiples of 32, 8k+1 frames). `1920x1080` is generated at `1920x1088` and trimmed back with ffmpeg, so you still get exactly what you asked for.
+- **Start/end images are fitted before upload.** An image that is not exactly the target shape is resized, cropped or padded by genai instead of the backend guessing. Exact-size images are edge-extended so the trim-back lines up pixel for pixel. Behaviour is set by the `source_fit` setting (`cover` default, `contain`, `off`).
+- **Preserve layout (i2v, Advanced)** uses the start image as the end frame too and steers the prompt to motion only — for graphics, text and logos.
+- **Loop to N seconds (Advanced)** repeats the finished clip with ffmpeg until it reaches the length you need. With Preserve layout the seam is invisible.
+
+ffmpeg and Pillow must be available on the genai host. Run the tests with `pip install -r requirements-dev.txt && pytest`.
+
 ## Connect Wan2GP (MCP)
 
 On the WanGP machine:

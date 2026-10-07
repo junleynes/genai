@@ -68,6 +68,9 @@ DEFAULT_SETTINGS = {
     "wan2gp_cli_args": "--attention sdpa --profile 4",
     # Auto-model defaults. Kept separate per output medium: a single default
     # meant an image job resolved to a video model and vice versa.
+    # How start/end images are conformed to the generation size when their
+    # shape differs: "cover" (crop a little), "contain" (pad) or "off".
+    "source_fit": "cover",
     "default_model_type": "ltx2_22B_distilled_1_1",    # video jobs
     "default_image_model_type": "flux_dev",            # image jobs (t2i / i2i)
     # Per-job-type overrides. Blank falls back to the medium defaults above.

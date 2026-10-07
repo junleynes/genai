@@ -33,9 +33,38 @@ STRETCH_TOLERANCE = 0.03
 MAX_CROP_LOSS = 0.08
 
 
+def _edge_extend(img, width: int, height: int):
+    """Centre img on a width×height canvas, replicating its edge rows/columns.
+
+    Used when the model runs on a slightly larger grid than the size the user
+    asked for (e.g. 1920x1088 for 1920x1080): the extra rows are copies of the
+    border, so after the result is cropped back the user's image lines up
+    exactly instead of being stretched to fill the grid.
+    """
+    from PIL import Image
+    iw, ih = img.size
+    left, top = (width - iw) // 2, (height - ih) // 2
+    canvas = Image.new("RGB", (width, height))
+    canvas.paste(img, (left, top))
+    if top > 0:
+        canvas.paste(img.crop((0, 0, iw, 1)).resize((iw, top), Image.NEAREST), (left, 0))
+        canvas.paste(img.crop((0, ih - 1, iw, ih)).resize((iw, height - top - ih), Image.NEAREST), (left, top + ih))
+    if left > 0:
+        col_l = canvas.crop((left, 0, left + 1, height)).resize((left, height), Image.NEAREST)
+        col_r = canvas.crop((left + iw - 1, 0, left + iw, height)).resize((width - left - iw, height), Image.NEAREST)
+        canvas.paste(col_l, (0, 0))
+        canvas.paste(col_r, (left + iw, 0))
+    return canvas
+
+
 def fit_image(src: str | Path, width: int, height: int, out_dir: Path,
-              mode: str = "cover") -> tuple[str, dict]:
+              mode: str = "cover",
+              inner_size: Optional[tuple[int, int]] = None) -> tuple[str, dict]:
     """Conform an image to exactly width×height.
+
+    inner_size, when given and ≤32px smaller than width×height, is the size
+    the user actually asked for: the image is fitted to that and then
+    edge-extended to the full grid so a later crop restores it exactly.
 
     Returns (path, info). info["action"] is one of: "none" (already exact or
     fitting is off), "resize", "cover", "contain". The original is never
@@ -55,7 +84,7 @@ def fit_image(src: str | Path, width: int, height: int, out_dir: Path,
     try:
         st = src.stat()
         sig = hashlib.sha1(
-            f"{src.resolve()}|{st.st_mtime_ns}|{st.st_size}|{width}x{height}|{mode}".encode()
+            f"{src.resolve()}|{st.st_mtime_ns}|{st.st_size}|{width}x{height}|{mode}|{inner_size}".encode()
         ).hexdigest()[:16]
         out_dir.mkdir(parents=True, exist_ok=True)
         dest = out_dir / f"fit_{sig}.png"
@@ -67,31 +96,51 @@ def fit_image(src: str | Path, width: int, height: int, out_dir: Path,
             if (sw, sh) == (width, height):
                 return str(src), info
 
-            src_ar, dst_ar = sw / sh, width / height
+            extend = False
+            fw, fh = width, height
+            if (inner_size and tuple(inner_size) != (width, height)
+                    and width >= inner_size[0] and height >= inner_size[1]
+                    and width - inner_size[0] <= 32 and height - inner_size[1] <= 32):
+                fw, fh = inner_size
+                extend = True
+                info["extended_from"] = tuple(inner_size)
+                if (sw, sh) == (fw, fh):
+                    # Exact size already: only the edge-extension is needed.
+                    info["action"] = "extend"
+                    dest2 = out_dir / f"fit_{sig}.png"
+                    if not dest2.exists() or dest2.stat().st_size == 0:
+                        tmp = dest2.with_suffix(".tmp.png")
+                        _edge_extend(im.convert("RGB"), width, height).save(tmp, "PNG")
+                        tmp.replace(dest2)
+                    return str(dest2), info
+
+            src_ar, dst_ar = sw / sh, fw / fh
             mismatch = abs(src_ar / dst_ar - 1)
             info["aspect_mismatch"] = round(mismatch, 4)
 
             rgb = im.convert("RGB")
             if mismatch <= STRETCH_TOLERANCE:
                 action = "resize"
-                out = rgb.resize((width, height), Image.LANCZOS)
+                out = rgb.resize((fw, fh), Image.LANCZOS)
             else:
                 # Fraction of the source lost if we cover-crop.
                 loss = 1 - (min(src_ar, dst_ar) / max(src_ar, dst_ar))
                 if mode == "cover" and loss <= MAX_CROP_LOSS:
                     action = "cover"
                     info["crop_loss"] = round(loss, 4)
-                    out = ImageOps.fit(rgb, (width, height), Image.LANCZOS, centering=(0.5, 0.5))
+                    out = ImageOps.fit(rgb, (fw, fh), Image.LANCZOS, centering=(0.5, 0.5))
                 else:
                     action = "contain"
-                    scale = min(width / sw, height / sh)
+                    scale = min(fw / sw, fh / sh)
                     nw, nh = max(1, round(sw * scale)), max(1, round(sh * scale))
                     resized = rgb.resize((nw, nh), Image.LANCZOS)
                     # Graphics are usually flat at the edges; pad with the colour
                     # at the top-centre so the bars don't read as black.
-                    canvas = Image.new("RGB", (width, height), rgb.getpixel((sw // 2, 0)))
-                    canvas.paste(resized, ((width - nw) // 2, (height - nh) // 2))
+                    canvas = Image.new("RGB", (fw, fh), rgb.getpixel((sw // 2, 0)))
+                    canvas.paste(resized, ((fw - nw) // 2, (fh - nh) // 2))
                     out = canvas
+            if extend:
+                out = _edge_extend(out, width, height)
             info["action"] = action
             if not dest.exists() or dest.stat().st_size == 0:
                 tmp = dest.with_suffix(".tmp.png")

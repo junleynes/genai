@@ -1244,6 +1244,8 @@ async def create_job(
     audio_library_id: str = Form(""),
     video_library_id: str = Form(""),
     end_image_library_id: str = Form(""),
+    preserve_layout: bool = Form(False),
+    loop_to_seconds: float = Form(0),
 ):
     allowed = set(ALL_JOB_TYPES)
     if job_type not in allowed:
@@ -1374,7 +1376,11 @@ async def create_job(
         "msr_reference_video_length": msr_reference_video_length,
         "sheet_layout": sheet_layout if job_type == "cs" else None,
         "loras": loras.strip(),
+        "preserve_layout": bool(preserve_layout) if job_type == "i2v" else None,
+        "loop_to_seconds": loop_to_seconds if (loop_to_seconds or 0) > 0 and job_type in VIDEO_JOB_TYPES else None,
     }
+    if not (0 <= (loop_to_seconds or 0) <= 120):
+        raise HTTPException(400, "Loop length must be between 0 and 120 seconds")
     if mode == "easy":
         # Ceiling is a guard against runaway values, not a quality cap —
         # the broadcast preset legitimately needs more than 25.
